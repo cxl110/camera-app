@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// Represents a neural network photo filter.
 ///
 /// Each filter is a CoreML model converted from Filter4Free's PyTorch weights.
@@ -195,7 +197,6 @@ class PhotoFilter {
   }
 }
 
-/// Preset watermark styles.
 enum WatermarkStyle {
   text,
   logo,

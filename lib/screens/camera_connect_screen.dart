@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:provider/provider.dart';
 import '../services/camera_service.dart';
 
@@ -150,7 +150,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
               hintText: 'http://192.168.122.1:8080',
-              hintStyle: const TextStyle(color: Colors.white20),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
               filled: true,
               fillColor: const Color(0xFF0D0D1A),
               border: OutlineInputBorder(
@@ -176,7 +176,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
                   label: Text(isConnected ? '断开连接' : '自动检测'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white60,
-                    side: const BorderSide(color: Colors.white20),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
                     padding: const EdgeInsets.all(14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),

@@ -8,10 +8,20 @@ import 'services/image_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock to portrait mode for camera/photo use
+  // Lock to portrait for camera use
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
+
+  // Dark status bar with transparent background
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Color(0xFF08080A),
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
 
   // Initialize services
   final filterService = FilterService();
