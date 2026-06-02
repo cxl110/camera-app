@@ -1,0 +1,70 @@
+name: camera_app
+description: 相机伴侣 - WiFi连接相机，AI滤镜编辑，水印，分享
+version: 0.1.0+1
+publish_to: none
+
+environment:
+  sdk: ^3.6.0
+  flutter: ^3.27.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.8
+  flutter_colorpicker: ^1.1.0
+
+  # Image handling
+  image_picker: ^1.1.2
+  image: ^4.2.0
+  image_cropper: ^8.0.2
+  cached_network_image: ^3.4.1
+  photo_view: ^0.15.0
+
+  # File & path
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+  # Camera / WiFi transfer
+  http: ^1.2.2
+  connectivity_plus: ^6.1.0
+  wifi_scan: ^0.4.1
+
+  # Sharing & export
+  share_plus: ^10.1.2
+  image_gallery_saver_plus: ^3.0.0
+
+  # CoreML / ML inference
+  mlkit_core: ^0.1.1
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+  # Storage
+  sqflite: ^2.4.1
+  shared_preferences: ^2.3.3
+
+  # State management
+  provider: ^6.1.2
+
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.5.1
+  exif: ^3.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/models/
+
+flutter_launcher_icons:
+  ios: true
+  image_path: "assets/icon.png"

@@ -1,0 +1,45 @@
+# Flutter
+.dart_tool/
+.packages
+build/
+*.iml
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Runner.xcworkspace/xcshareddata/
+*.xcuserdata
+DerivedData/
+
+# Android
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# CoreML compiled models
+*.mlmodelc/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sensitive
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.cer

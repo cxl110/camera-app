@@ -1,0 +1,132 @@
+name: Build iOS App
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build-type:
+        description: 'Build type'
+        type: choice
+        options:
+          - debug
+          - release
+        default: debug
+
+env:
+  FLUTTER_VERSION: '3.27.0'
+
+jobs:
+  # ─── Model Conversion ──────────────────────────────────────
+  convert-models:
+    name: Convert Models to CoreML
+    runs-on: macos-15
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[models]')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install coremltools pillow numpy opencv-python tqdm
+
+      - name: Convert models
+        run: |
+          python scripts/convert_models.py \
+            --checkpoints-dir ./pretrained_checkpoints \
+            --output-dir ./assets/models \
+            --force
+
+      - name: Upload CoreML models
+        uses: actions/upload-artifact@v4
+        with:
+          name: coreml-models
+          path: assets/models/*.mlmodel
+          retention-days: 30
+
+  # ─── iOS Build ─────────────────────────────────────────────
+  build-ios:
+    name: Build iOS
+    runs-on: macos-15
+    needs: convert-models
+    if: always() && !failure()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CoreML models
+        uses: actions/download-artifact@v4
+        with:
+          name: coreml-models
+          path: assets/models/
+        continue-on-error: true
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Verify Flutter
+        run: flutter doctor
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run code generation
+        run: dart run build_runner build --delete-conflicting-outputs
+        continue-on-error: true
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        continue-on-error: true
+
+      - name: Build iOS (debug)
+        if: github.event.inputs.build-type != 'release'
+        run: |
+          flutter build ios --debug --no-codesign
+
+      - name: Build iOS (release)
+        if: github.event.inputs.build-type == 'release'
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Upload iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build
+          path: build/ios/iphoneos/
+          retention-days: 30
+
+  # ─── Code Quality ──────────────────────────────────────────
+  analyze:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
