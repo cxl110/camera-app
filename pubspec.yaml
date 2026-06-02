@@ -29,14 +29,11 @@ dependencies:
   # Camera / WiFi transfer
   http: ^1.2.2
   connectivity_plus: ^6.1.0
-  wifi_scan: ^0.4.1
 
   # Sharing & export
   share_plus: ^10.1.2
-  image_gallery_saver_plus: ^3.0.0
 
-  # CoreML / ML inference
-  mlkit_core: ^0.1.1
+  # CoreML inference is handled via native platform channel (ios/Runner/CoreMLPlugin.swift)
 
   # Permissions
   permission_handler: ^11.3.1
