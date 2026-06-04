@@ -7,6 +7,7 @@ import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
 import '../widgets/bottom_tabs.dart';
 import 'camera_connect_screen.dart';
+import 'effects_screen.dart';
 
 /// Main camera screen per user's mockup design.
 ///
@@ -61,6 +62,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onRecord: _onRecordPressed,
               isRecording: _isRecording,
             ),
+
+            const SizedBox(height: 24),
 
             // ── Bottom Tabs ──
             BottomTabs(
@@ -186,12 +189,12 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Bottom tab changed.
   void _onTabChanged(String tab) {
     if (tab == 'effects') {
-      // TODO: Navigate to effects/filter page
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('EFFECTS 滤镜页面（开发中）'),
-          backgroundColor: Color(0xFF1A1A2E),
-          duration: Duration(seconds: 1),
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => EffectsScreen(
+            wifiConnected: _wifiConnected,
+          ),
         ),
       );
       return;
