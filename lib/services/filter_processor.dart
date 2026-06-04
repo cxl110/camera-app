@@ -1,14 +1,46 @@
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
+import 'neural_filter_client.dart';
 
 /// Applies film simulation filters to images.
 ///
-/// Prototype: Uses color matrix + curve adjustments to approximate
-/// Filter4Free neural network film simulations.
-/// Production: Will be replaced by CoreML inference on iOS.
+/// Filter processing — tries neural server first, falls back to local simulation.
+///
+/// 1. NeuralFilterClient (Python inference_server.py) — real AI inference
+/// 2. Dart color matrix — local simulation fallback
 class FilterProcessor {
+  static NeuralFilterClient? _neuralClient;
+
+  /// Configure neural backend.
+  static void setNeuralBackend(NeuralFilterClient client) {
+    _neuralClient = client;
+  }
+
+  /// Check if neural backend is available.
+  static Future<bool> get isNeuralAvailable async {
+    if (_neuralClient == null) return false;
+    return await _neuralClient!.isAvailable();
+  }
+
   /// Apply a named film filter to image bytes.
-  static Uint8List apply(Uint8List input, String filterName) {
+  /// Tries neural inference first, falls back to local simulation.
+  static Future<Uint8List> apply(Uint8List input, String filterName) async {
+    // Try neural backend first
+    if (_neuralClient != null) {
+      final result = await _neuralClient!.applyFilter(
+        imageBytes: input,
+        filterName: filterName,
+        preview: true,
+      );
+      if (result != null) return result;
+    }
+
+    // Fallback to local color matrix simulation
+    return _applyLocal(input, filterName);
+  }
+
+  /// Local color matrix simulation (fallback).
+  static Uint8List _applyLocal(Uint8List input, String filterName) {
     final image = img.decodeImage(input);
     if (image == null) return input;
 

@@ -6,6 +6,8 @@ import 'app.dart';
 import 'services/filter_service.dart';
 import 'services/camera_protocol.dart';
 import 'services/mock_camera_protocol.dart';
+import 'services/neural_filter_client.dart';
+import 'services/filter_processor.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +33,9 @@ void main() async {
 
   // Mock camera protocol (swap to HttpCameraProtocol when DIY camera ready)
   final cameraProtocol = MockCameraProtocol();
+
+  // Neural filter backend (Python inference server)
+  FilterProcessor.setNeuralBackend(NeuralFilterClient());
 
   runApp(
     MultiProvider(

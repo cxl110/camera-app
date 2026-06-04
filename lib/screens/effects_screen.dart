@@ -293,9 +293,10 @@ class _EffectsScreenState extends State<EffectsScreen> {
     }
   }
 
-  void _applyFilter(String preset) {
+  void _applyFilter(String preset) async {
     if (_previewImage == null) return;
-    final filtered = FilterProcessor.apply(_previewImage!, preset);
+    final filtered = await FilterProcessor.apply(_previewImage!, preset);
+    if (!mounted) return;
     setState(() {
       _selectedPreset = preset;
       _filteredImage = filtered;
