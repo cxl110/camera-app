@@ -29,7 +29,7 @@ class LightLeakControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -41,7 +41,7 @@ class LightLeakControl extends StatelessWidget {
                 'LIGHT LEAK',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -53,7 +53,7 @@ class LightLeakControl extends StatelessWidget {
                 '${enabled ? intensity.round() : 0}%',
                 style: TextStyle(
                   color: enabled ? const Color(0xFFD89A0F) : Colors.white38,
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -76,9 +76,9 @@ class LightLeakControl extends StatelessWidget {
           ),
 
           // Row 2: Style selector (always visible)
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           SizedBox(
-            height: 32,
+            height: 28,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: _styles.length,
@@ -141,7 +141,7 @@ class _StyleChip extends StatelessWidget {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color: isSelected && enabled
               ? const Color(0xFFD89A0F).withValues(alpha: 0.2)

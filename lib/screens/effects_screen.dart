@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
+import '../services/filter_processor.dart';
 import '../widgets/film_presets.dart';
 import '../widgets/grain_control.dart';
 import '../widgets/light_leak_control.dart';
@@ -25,7 +26,8 @@ class EffectsScreen extends StatefulWidget {
 
 class _EffectsScreenState extends State<EffectsScreen> {
   bool _showBefore = false;
-  Uint8List? _previewImage; // Selected photo for preview
+  Uint8List? _previewImage;       // Original photo
+  Uint8List? _filteredImage;     // After filter applied
 
   // Film presets
   String _selectedPreset = 'CLASSIC CHROME';
@@ -92,11 +94,11 @@ class _EffectsScreenState extends State<EffectsScreen> {
                   FilmPresets(
                     selectedPreset: _selectedPreset,
                     onPresetSelected: (preset) {
-                      setState(() => _selectedPreset = preset);
+                      _applyFilter(preset);
                     },
                   ),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 2),
 
                   // ── GRAIN ──
                   GrainControl(
@@ -106,7 +108,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     onIntensityChanged: (v) => setState(() => _grainIntensity = v),
                   ),
 
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 0),
 
                   // ── LIGHT LEAK ──
                   LightLeakControl(
@@ -118,7 +120,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     onStyleChanged: (s) => setState(() => _lightLeakStyle = s),
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 8),
                 ],
               ),
             ),
@@ -165,7 +167,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   Widget _buildPreviewArea() {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.32,
+      height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1E),
@@ -173,12 +175,17 @@ class _EffectsScreenState extends State<EffectsScreen> {
       ),
       child: Stack(
         children: [
-          // Preview image
+          // Preview image (show filtered by default, original when BEFORE)
           if (_previewImage != null)
             Positioned.fill(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(7),
-                child: Image.memory(_previewImage!, fit: BoxFit.cover),
+                child: Image.memory(
+                  (_showBefore || _filteredImage == null)
+                      ? _previewImage!
+                      : _filteredImage!,
+                  fit: BoxFit.cover,
+                ),
               ),
             )
           else
@@ -262,7 +269,11 @@ class _EffectsScreenState extends State<EffectsScreen> {
       if (result.photos.isNotEmpty) {
         final firstPhoto = result.photos.first;
         if (firstPhoto.fullImage != null) {
-          setState(() => _previewImage = firstPhoto.fullImage);
+          setState(() {
+            _previewImage = firstPhoto.fullImage;
+            _showBefore = false;
+          });
+          _applyFilter(_selectedPreset);
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -280,6 +291,16 @@ class _EffectsScreenState extends State<EffectsScreen> {
         ),
       );
     }
+  }
+
+  void _applyFilter(String preset) {
+    if (_previewImage == null) return;
+    final filtered = FilterProcessor.apply(_previewImage!, preset);
+    setState(() {
+      _selectedPreset = preset;
+      _filteredImage = filtered;
+      _showBefore = false;
+    });
   }
 }
 

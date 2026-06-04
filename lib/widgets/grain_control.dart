@@ -22,7 +22,7 @@ class GrainControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -34,7 +34,7 @@ class GrainControl extends StatelessWidget {
                 'GRAIN',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -46,7 +46,7 @@ class GrainControl extends StatelessWidget {
                 '${enabled ? intensity.round() : 0}%',
                 style: TextStyle(
                   color: enabled ? const Color(0xFFD89A0F) : Colors.white38,
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
               ),

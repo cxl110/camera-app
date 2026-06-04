@@ -38,7 +38,7 @@ class FilmPresets extends StatelessWidget {
       children: [
         // Section title
         const Padding(
-          padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: EdgeInsets.fromLTRB(16, 6, 16, 4),
           child: Text(
             'FILM PRESETS',
             style: TextStyle(
