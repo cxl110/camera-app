@@ -293,14 +293,18 @@ class _EffectsScreenState extends State<EffectsScreen> {
     }
   }
 
-  void _applyFilter(String preset) async {
+  void _applyFilter(String preset) {
     if (_previewImage == null) return;
-    final filtered = await FilterProcessor.apply(_previewImage!, preset);
-    if (!mounted) return;
+    // 1. Immediately highlight selected preset
     setState(() {
       _selectedPreset = preset;
-      _filteredImage = filtered;
-      _showBefore = false;
+      _showBefore = false; // show current filtered result while loading
+    });
+    // 2. Process neural inference in background
+    final bytes = _previewImage!;
+    FilterProcessor.apply(bytes, preset).then((filtered) {
+      if (!mounted) return;
+      setState(() => _filteredImage = filtered);
     });
   }
 }
