@@ -48,16 +48,15 @@ class LightLeakControl extends StatelessWidget {
 
               const SizedBox(width: 8),
 
-              // Intensity value (only when enabled)
-              if (enabled)
-                Text(
-                  '${intensity.round()}%',
-                  style: const TextStyle(
-                    color: Color(0xFFD89A0F),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
+              // Intensity value (0% when disabled)
+              Text(
+                '${enabled ? intensity.round() : 0}%',
+                style: TextStyle(
+                  color: enabled ? const Color(0xFFD89A0F) : Colors.white38,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
+              ),
 
               const Spacer(),
 
@@ -99,26 +98,24 @@ class LightLeakControl extends StatelessWidget {
             ),
           ),
 
-          // Row 3: Slider (only when enabled)
-          if (enabled) ...[
-            const SizedBox(height: 4),
-            SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                activeTrackColor: const Color(0xFFD89A0F),
-                inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
-                thumbColor: const Color(0xFFD89A0F),
-                overlayColor: const Color(0xFFD89A0F).withValues(alpha: 0.1),
-              ),
-              child: Slider(
-                value: intensity,
-                min: 0,
-                max: 100,
-                onChanged: onIntensityChanged,
-              ),
+          // Row 3: Slider (always visible, at 0 when disabled)
+          const SizedBox(height: 4),
+          SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              activeTrackColor: const Color(0xFFD89A0F),
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+              thumbColor: const Color(0xFFD89A0F),
+              overlayColor: const Color(0xFFD89A0F).withValues(alpha: 0.1),
             ),
-          ],
+            child: Slider(
+              value: enabled ? intensity : 0,
+              min: 0,
+              max: 100,
+              onChanged: enabled ? onIntensityChanged : null,
+            ),
+          ),
         ],
       ),
     );

@@ -33,7 +33,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _wifiConnected = false;
+  bool _wifiConnected = true; // 原型阶段默认模拟已连接
   bool _isRecording = false;
   Uint8List? _lastPhoto;
   String _activeTab = 'camera';
