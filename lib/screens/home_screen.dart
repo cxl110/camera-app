@@ -1,30 +1,14 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/camera_service.dart';
+import '../services/camera_protocol.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
 import '../widgets/bottom_tabs.dart';
-import 'camera_connect_screen.dart';
 import 'effects_screen.dart';
 
-/// Main camera screen per user's mockup design.
-///
-/// Layout:
-/// ┌──────────────────────────┐
-/// │ [WiFi]            [📁]  │  Top bar
-/// ├──────────────────────────┤
-/// │                          │
-/// │    Camera Live Preview   │  Viewfinder area
-/// │   (black when disconnected)
-/// │                          │
-/// ├──────────────────────────┤
-/// │ [📷]     [○]     [●]   │  Capture controls
-/// │ thumb   shutter  record  │
-/// ├──────────────────────────┤
-/// │  CAMERA      EFFECTS     │  Bottom tabs
-/// └──────────────────────────┘
+/// Main camera screen.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -33,10 +17,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _wifiConnected = true; // 原型阶段默认模拟已连接
+  bool _wifiConnected = true; // Prototype: always connected
   bool _isRecording = false;
   Uint8List? _lastPhoto;
   String _activeTab = 'camera';
+
+  CameraProtocol get _protocol => context.read<CameraProtocol>();
 
   @override
   Widget build(BuildContext context) {
@@ -45,27 +31,17 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // ── Top Bar ──
             _buildTopBar(),
-
-            // ── Camera Viewfinder ──
             Expanded(
-              child: CameraPreview(
-                isConnected: _wifiConnected,
-              ),
+              child: CameraPreview(isConnected: _wifiConnected),
             ),
-
-            // ── Capture Controls ──
             CaptureControls(
               lastPhoto: _lastPhoto,
               onShutter: _onShutterPressed,
               onRecord: _onRecordPressed,
               isRecording: _isRecording,
             ),
-
             const SizedBox(height: 24),
-
-            // ── Bottom Tabs ──
             BottomTabs(
               activeTab: _activeTab,
               onTabChanged: _onTabChanged,
@@ -76,28 +52,21 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Top bar with WiFi indicator (left) and folder button (right).
   Widget _buildTopBar() {
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0A0A0A),
-      ),
+      decoration: const BoxDecoration(color: Color(0xFF0A0A0A)),
       child: Row(
         children: [
-          // WiFi signal indicator
           GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () {
-              // Toggle WiFi for demo purposes
-              // In production, this would navigate to WiFi settings
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ChangeNotifierProvider(
-                    create: (_) => CameraService(),
-                    child: const CameraConnectScreen(),
-                  ),
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('已连接 DIY-CAM-001'),
+                  backgroundColor: Color(0xFF1A1A2E),
+                  duration: Duration(seconds: 1),
                 ),
               );
             },
@@ -119,21 +88,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-
           const Spacer(),
-
-          // Folder button (camera photo list)
           IconButton(
-            onPressed: () {
-              // TODO: Open camera photo preview list
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('相机照片列表（页面开发中）'),
-                  backgroundColor: Color(0xFF1A1A2E),
-                  duration: Duration(seconds: 1),
-                ),
-              );
-            },
+            onPressed: _onOpenGallery,
             icon: Icon(
               Icons.folder_outlined,
               color: Colors.white.withValues(alpha: 0.7),
@@ -146,61 +103,109 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Shutter button pressed - take a photo.
-  void _onShutterPressed() {
-    // Simulate taking a photo
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('📸 拍照'),
-        backgroundColor: Color(0xFF1A1A2E),
-        duration: Duration(milliseconds: 600),
-        behavior: SnackBarBehavior.floating,
-        margin: EdgeInsets.only(bottom: 160),
-      ),
-    );
+  void _onOpenGallery() async {
+    try {
+      final result = await _protocol.listPhotos(limit: 20);
+      if (!mounted) return;
 
-    // Simulate a dark thumbnail appearing
-    setState(() {
-      _lastPhoto = Uint8List.fromList([
-        0x89, 0x50, 0x4E, 0x47 // minimal PNG header simulation
-      ]);
-    });
+      if (result.photos.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('相册为空'),
+            backgroundColor: Color(0xFF1A1A2E),
+          ),
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已加载 ${result.photos.length} 张照片'),
+          backgroundColor: const Color(0xFF1A1A2E),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('加载失败: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  /// Record button pressed - start/stop video.
-  void _onRecordPressed() {
-    setState(() {
-      _isRecording = !_isRecording;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_isRecording ? '🔴 录制中...' : '⏹ 录制停止'),
-        backgroundColor: _isRecording
-            ? const Color(0xFFC62828)
-            : const Color(0xFF1A1A2E),
-        duration: const Duration(milliseconds: 800),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(bottom: 160),
-      ),
-    );
+  void _onShutterPressed() async {
+    try {
+      final result = await _protocol.capturePhoto();
+      if (!mounted) return;
+      setState(() {
+        _lastPhoto = result.thumbnail ?? result.fullImage;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('📸 ${result.name}'),
+          backgroundColor: const Color(0xFF1A1A2E),
+          duration: const Duration(milliseconds: 600),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 160),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('拍照失败: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  /// Bottom tab changed.
+  void _onRecordPressed() async {
+    if (_isRecording) {
+      try {
+        final result = await _protocol.stopRecording();
+        if (!mounted) return;
+        setState(() => _isRecording = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⏹ ${result.name}'),
+            backgroundColor: const Color(0xFF1A1A2E),
+            duration: const Duration(milliseconds: 800),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.only(bottom: 160),
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _isRecording = false);
+      }
+    } else {
+      await _protocol.startRecording();
+      if (!mounted) return;
+      setState(() => _isRecording = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🔴 录制中...'),
+          backgroundColor: Color(0xFFC62828),
+          duration: Duration(milliseconds: 800),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.only(bottom: 160),
+        ),
+      );
+    }
+  }
+
   void _onTabChanged(String tab) {
     if (tab == 'effects') {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => EffectsScreen(
-            wifiConnected: _wifiConnected,
-          ),
+          builder: (_) => EffectsScreen(wifiConnected: _wifiConnected),
         ),
       );
       return;
     }
-    setState(() {
-      _activeTab = tab;
-    });
+    setState(() => _activeTab = tab);
   }
 }

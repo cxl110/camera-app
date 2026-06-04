@@ -4,19 +4,18 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'app.dart';
 import 'services/filter_service.dart';
-import 'services/image_service.dart';
+import 'services/camera_protocol.dart';
+import 'services/mock_camera_protocol.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock to portrait for camera use (mobile only)
   if (!kIsWeb) {
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
   }
 
-  // Dark status bar
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -26,22 +25,18 @@ void main() async {
     ),
   );
 
-  // Initialize services (graceful on web)
+  // Initialize services
   final filterService = FilterService();
   await filterService.initialize();
 
-  ImageService? imageService;
-  if (!kIsWeb) {
-    imageService = ImageService();
-    await imageService.initialize();
-  }
+  // Mock camera protocol (swap to HttpCameraProtocol when DIY camera ready)
+  final cameraProtocol = MockCameraProtocol();
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<FilterService>.value(value: filterService),
-        if (imageService != null)
-          ChangeNotifierProvider<ImageService>.value(value: imageService),
+        Provider<CameraProtocol>.value(value: cameraProtocol),
       ],
       child: const CameraApp(),
     ),

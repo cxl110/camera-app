@@ -1,4 +1,7 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/camera_protocol.dart';
 import '../widgets/film_presets.dart';
 import '../widgets/grain_control.dart';
 import '../widgets/light_leak_control.dart';
@@ -21,7 +24,8 @@ class EffectsScreen extends StatefulWidget {
 }
 
 class _EffectsScreenState extends State<EffectsScreen> {
-  bool _showBefore = false; // false=AFTER (filtered), true=BEFORE (original)
+  bool _showBefore = false;
+  Uint8List? _previewImage; // Selected photo for preview
 
   // Film presets
   String _selectedPreset = 'CLASSIC CHROME';
@@ -151,15 +155,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
           // Album button
           IconButton(
             icon: Icon(Icons.folder_outlined, color: Colors.white.withValues(alpha: 0.7), size: 22),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('相机照片列表（页面开发中）'),
-                  backgroundColor: Color(0xFF1A1A2E),
-                  duration: Duration(seconds: 1),
-                ),
-              );
-            },
+            onPressed: _onOpenAlbum,
             tooltip: '相册',
           ),
         ],
@@ -177,14 +173,22 @@ class _EffectsScreenState extends State<EffectsScreen> {
       ),
       child: Stack(
         children: [
-          // Preview image placeholder
-          Center(
-            child: Icon(
-              Icons.image_outlined,
-              size: 64,
-              color: Colors.white.withValues(alpha: 0.1),
+          // Preview image
+          if (_previewImage != null)
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: Image.memory(_previewImage!, fit: BoxFit.cover),
+              ),
+            )
+          else
+            Center(
+              child: Icon(
+                Icons.image_outlined,
+                size: 64,
+                color: Colors.white.withValues(alpha: 0.1),
+              ),
             ),
-          ),
 
           // ── Top-left: Filter name ──
           Positioned(
@@ -247,6 +251,35 @@ class _EffectsScreenState extends State<EffectsScreen> {
         ],
       ),
     );
+  }
+
+  void _onOpenAlbum() async {
+    final protocol = context.read<CameraProtocol>();
+    try {
+      final result = await protocol.listPhotos(limit: 20);
+      if (!mounted) return;
+
+      if (result.photos.isNotEmpty) {
+        final firstPhoto = result.photos.first;
+        if (firstPhoto.fullImage != null) {
+          setState(() => _previewImage = firstPhoto.fullImage);
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已加载 ${result.photos.length} 张照片'),
+            backgroundColor: const Color(0xFF1A1A2E),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('加载失败: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
