@@ -179,14 +179,22 @@ class _BordersScreenState extends State<BordersScreen> {
   }
 
   Widget _buildBorderOverlay() {
-    final scale = _borderThickness / 100.0;
-    return Transform.scale(
-      scale: scale,
-      alignment: Alignment.center,
-      child: Image.asset(
-        'assets/frames/$_selectedBorder',
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const SizedBox(),
+    // Photo stays fixed. Border scales from center:
+    // 100% = original (scale 1.0)
+    // 50%  = thinner (scale 2.0 → border pushed outward → less visible)
+    final scale = 100.0 / _borderThickness;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(7),
+      child: Transform.scale(
+        scale: scale,
+        alignment: Alignment.center,
+        child: Image.asset(
+          'assets/frames/$_selectedBorder',
+          fit: BoxFit.fill,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, __, ___) => const SizedBox(),
+        ),
       ),
     );
   }
