@@ -7,6 +7,7 @@ import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
 import '../widgets/bottom_tabs.dart';
 import 'effects_screen.dart';
+import 'borders_screen.dart';
 
 /// Main camera screen.
 class HomeScreen extends StatefulWidget {
@@ -198,14 +199,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onTabChanged(String tab) {
     if (tab == 'effects') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => EffectsScreen(wifiConnected: _wifiConnected),
-        ),
-      );
+      _navigateTo(EffectsScreen(wifiConnected: _wifiConnected));
+      return;
+    }
+    if (tab == 'borders') {
+      _navigateTo(BordersScreen(wifiConnected: _wifiConnected));
       return;
     }
     setState(() => _activeTab = tab);
+  }
+
+  void _navigateTo(Widget page) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => page),
+    );
   }
 }

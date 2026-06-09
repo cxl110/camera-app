@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Bottom navigation tabs for the main camera screen.
-///
-/// Two tabs:
-/// - CAMERA: Active by default (current view)
-/// - EFFECTS: Switches to filter/effects page
+/// Bottom navigation tabs — CAMERA / EFFECTS / BORDERS.
 class BottomTabs extends StatelessWidget {
-  final String activeTab; // 'camera' or 'effects'
+  final String activeTab;
   final ValueChanged<String> onTabChanged;
 
   const BottomTabs({
@@ -15,6 +11,12 @@ class BottomTabs extends StatelessWidget {
     required this.onTabChanged,
   });
 
+  static const _tabs = [
+    _TabData('CAMERA', Icons.camera_alt_outlined),
+    _TabData('EFFECTS', Icons.auto_fix_high_outlined),
+    _TabData('BORDERS', Icons.crop_free),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -22,34 +24,29 @@ class BottomTabs extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       decoration: const BoxDecoration(
         color: Color(0xFF0A0A0A),
-        border: Border(
-          top: BorderSide(color: Color(0xFF1A1A1A), width: 1),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFF1A1A1A), width: 1)),
       ),
       child: Row(
-        children: [
-          // CAMERA tab
-          Expanded(
+        children: _tabs.map((tab) {
+          final isActive = activeTab == tab.label;
+          return Expanded(
             child: _TabItem(
-              icon: Icons.camera_alt_outlined,
-              label: 'CAMERA',
-              isActive: activeTab == 'camera',
-              onTap: () => onTabChanged('camera'),
+              icon: tab.icon,
+              label: tab.label,
+              isActive: isActive,
+              onTap: () => onTabChanged(tab.label),
             ),
-          ),
-          // EFFECTS tab
-          Expanded(
-            child: _TabItem(
-              icon: Icons.auto_fix_high_outlined,
-              label: 'EFFECTS',
-              isActive: activeTab == 'effects',
-              onTap: () => onTabChanged('effects'),
-            ),
-          ),
-        ],
+          );
+        }).toList(),
       ),
     );
   }
+}
+
+class _TabData {
+  final String label;
+  final IconData icon;
+  const _TabData(this.label, this.icon);
 }
 
 class _TabItem extends StatelessWidget {
@@ -68,7 +65,7 @@ class _TabItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color color = isActive
-        ? const Color(0xFFD89A0F) // Gold accent when active
+        ? const Color(0xFFD89A0F)
         : Colors.white.withValues(alpha: 0.35);
 
     return GestureDetector(
@@ -77,13 +74,13 @@ class _TabItem extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 22),
+          Icon(icon, color: color, size: 20),
           const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
               color: color,
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
               letterSpacing: 1.5,
             ),
@@ -91,7 +88,7 @@ class _TabItem extends StatelessWidget {
           const SizedBox(height: 4),
           if (isActive)
             Container(
-              width: 24,
+              width: 20,
               height: 2,
               decoration: BoxDecoration(
                 color: const Color(0xFFD89A0F),

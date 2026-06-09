@@ -7,6 +7,7 @@ import '../widgets/film_presets.dart';
 import '../widgets/grain_control.dart';
 import '../widgets/light_leak_control.dart';
 import '../widgets/bottom_tabs.dart';
+import 'borders_screen.dart';
 
 /// EFFECTS filter page.
 ///
@@ -69,7 +70,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
         ),
         bottomNavigationBar: BottomTabs(
           activeTab: 'effects',
-          onTabChanged: (_) {},
+          onTabChanged: (tab) => _onTabChanged(tab),
         ),
       );
     }
@@ -128,7 +129,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
             // ── Bottom Tabs ──
             BottomTabs(
               activeTab: 'effects',
-              onTabChanged: (_) {},
+              onTabChanged: (tab) => _onTabChanged(tab),
             ),
           ],
         ),
@@ -311,6 +312,30 @@ class _EffectsScreenState extends State<EffectsScreen> {
         duration: const Duration(seconds: 1),
       ),
     );
+  }
+
+  void _onTabChanged(String tab) {
+    if (tab == 'borders') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BordersScreen(
+            wifiConnected: widget.wifiConnected,
+            selectedPhoto: _previewImage,
+          ),
+        ),
+      ).then((result) {
+        // If BORDERS page returned with a photo, update our preview
+        if (result is Uint8List && mounted) {
+          setState(() => _previewImage = result);
+        }
+      });
+      return;
+    }
+    if (tab == 'camera') {
+      Navigator.pop(context);
+      return;
+    }
   }
 
   void _applyFilter(String preset) {
