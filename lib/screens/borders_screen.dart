@@ -5,8 +5,6 @@ import '../services/camera_protocol.dart';
 import '../widgets/bottom_tabs.dart';
 
 /// BORDERS page — select film frame overlay and adjust thickness.
-///
-/// Shares selected photo with EFFECTS page.
 class BordersScreen extends StatefulWidget {
   final bool wifiConnected;
   final Uint8List? selectedPhoto;
@@ -24,7 +22,7 @@ class BordersScreen extends StatefulWidget {
 class _BordersScreenState extends State<BordersScreen> {
   Uint8List? _previewImage;
   String? _selectedBorder;
-  double _borderThickness = 100; // 0-100%, 100 = original
+  double _borderThickness = 100;
 
   static const _borderFiles = [
     'frame_00.png', 'frame_06.png', 'frame_07.png', 'frame_09.png',
@@ -71,11 +69,8 @@ class _BordersScreenState extends State<BordersScreen> {
         bottomNavigationBar: BottomTabs(
           activeTab: 'BORDERS',
           onTabChanged: (tab) {
-            if (tab == 'CAMERA') {
-              Navigator.popUntil(context, (route) => route.isFirst);
-            } else if (tab == 'EFFECTS') {
-              Navigator.pop(context, _previewImage);
-            }
+            if (tab == 'CAMERA') Navigator.popUntil(context, (route) => route.isFirst);
+            if (tab == 'EFFECTS') Navigator.pop(context);
           },
         ),
       );
@@ -86,17 +81,29 @@ class _BordersScreenState extends State<BordersScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // ── Top Bar ──
+            // ── Top Bar (matches EFFECTS) ──
             _buildTopBar(),
 
-            // ── Image Preview ──
+            // ── Image Preview (matches EFFECTS 42%) ──
             _buildPreview(),
 
-            // ── Border Grid ──
-            _buildBorderGrid(),
+            // ── Scrollable Content ──
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  // ── BORDERS (matches FILM PRESETS style) ──
+                  _buildBorderRow(),
 
-            // ── Thickness Slider ──
-            _buildThicknessSlider(),
+                  const SizedBox(height: 2),
+
+                  // ── THICKNESS (matches GRAIN/LIGHT LEAK style) ──
+                  _buildThicknessControl(),
+
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
 
             // ── Bottom Tabs ──
             BottomTabs(
@@ -119,27 +126,19 @@ class _BordersScreenState extends State<BordersScreen> {
       decoration: const BoxDecoration(color: Color(0xFF0A0A0A)),
       child: Row(
         children: [
-          // Back button
           IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 22),
             onPressed: () => Navigator.pop(context, _previewImage),
             tooltip: '返回',
           ),
-
           const Spacer(),
-
-          // Save button
           IconButton(
             icon: Icon(Icons.save_alt,
-                color: _selectedBorder != null
-                    ? Colors.white.withValues(alpha: 0.7)
-                    : Colors.white.withValues(alpha: 0.2),
+                color: (_selectedBorder != null ? Colors.white : Colors.white.withValues(alpha: 0.2)).withValues(alpha: 0.7),
                 size: 22),
             onPressed: _selectedBorder != null ? _onSave : null,
             tooltip: '保存',
           ),
-
-          // Select image button
           IconButton(
             icon: Icon(Icons.add_photo_alternate_outlined,
                 color: Colors.white.withValues(alpha: 0.7), size: 22),
@@ -153,10 +152,10 @@ class _BordersScreenState extends State<BordersScreen> {
 
   Widget _buildPreview() {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.30,
+      height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: _previewImage != null ? Colors.transparent : const Color(0xFF1A1A1E),
+        color: const Color(0xFF1A1A1E),
         borderRadius: BorderRadius.circular(8),
       ),
       child: _previewImage != null
@@ -164,138 +163,134 @@ class _BordersScreenState extends State<BordersScreen> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(7),
-                  child: Image.memory(_previewImage!, fit: BoxFit.contain, width: double.infinity, height: double.infinity),
+                  child: Image.memory(_previewImage!,
+                      fit: BoxFit.contain,
+                      width: double.infinity,
+                      height: double.infinity),
                 ),
-                // Border overlay would go here in production
                 if (_selectedBorder != null)
-                  Center(
+                  Positioned(
+                    top: 10, left: 10,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
+                        color: Colors.black.withValues(alpha: 0.6),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        '${_selectedBorder!.replaceAll('.png', '')}  ${_borderThickness.round()}%',
-                        style: const TextStyle(color: Color(0xFFD89A0F), fontSize: 11),
+                        '${_borderThickness.round()}%',
+                        style: const TextStyle(
+                            color: Color(0xFFD89A0F), fontSize: 12,
+                            fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
               ],
             )
           : Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.image_outlined, size: 48,
-                      color: Colors.white.withValues(alpha: 0.15)),
-                  const SizedBox(height: 8),
-                  Text('请选择图片',
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.25), fontSize: 13)),
-                ],
-              ),
+              child: Icon(Icons.image_outlined, size: 64,
+                  color: Colors.white.withValues(alpha: 0.1)),
             ),
     );
   }
 
-  Widget _buildBorderGrid() {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Text(
-              'BORDERS',
-              style: TextStyle(
-                color: Colors.white38, fontSize: 11,
-                fontWeight: FontWeight.w600, letterSpacing: 2,
-              ),
+  Widget _buildBorderRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 6, 16, 4),
+          child: Text(
+            'BORDERS',
+            style: TextStyle(
+              color: Colors.white38, fontSize: 11,
+              fontWeight: FontWeight.w600, letterSpacing: 2,
             ),
           ),
-          Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                mainAxisSpacing: 6,
-                crossAxisSpacing: 6,
-                childAspectRatio: 1.35,
-              ),
-              itemCount: _borderFiles.length,
-              itemBuilder: (context, index) {
-                final file = _borderFiles[index];
-                final isSelected = _selectedBorder == file;
-                return GestureDetector(
-                  onTap: () => setState(() => _selectedBorder = file),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: isSelected
-                            ? const Color(0xFFD89A0F)
-                            : Colors.white.withValues(alpha: 0.08),
-                        width: isSelected ? 2 : 1,
-                      ),
-                      color: Colors.white.withValues(alpha: 0.03),
+        ),
+        SizedBox(
+          height: 72,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: _borderFiles.length,
+            itemBuilder: (context, index) {
+              final file = _borderFiles[index];
+              final isSelected = _selectedBorder == file;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedBorder = file),
+                child: Container(
+                  width: 72,
+                  margin: const EdgeInsets.symmetric(horizontal: 5),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isSelected
+                          ? const Color(0xFFD89A0F)
+                          : Colors.white.withValues(alpha: 0.08),
+                      width: isSelected ? 2 : 1,
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(5),
-                      child: Image.asset(
-                        'assets/frames/$file',
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => Center(
-                          child: Icon(Icons.crop_free,
-                              size: 20,
-                              color: Colors.white.withValues(alpha: 0.15)),
-                        ),
+                    color: Colors.white.withValues(alpha: 0.03),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: Image.asset(
+                      'assets/frames/$file',
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Center(
+                        child: Icon(Icons.crop_free, size: 16,
+                            color: Colors.white.withValues(alpha: 0.15)),
                       ),
                     ),
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildThicknessSlider() {
+  Widget _buildThicknessControl() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'THICKNESS',
-            style: TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '${_borderThickness.round()}%',
-            style: const TextStyle(
-              color: Color(0xFFD89A0F), fontSize: 12, fontWeight: FontWeight.w600,
-            ),
-          ),
-          Expanded(
-            child: SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                activeTrackColor: const Color(0xFFD89A0F),
-                inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
-                thumbColor: const Color(0xFFD89A0F),
-                overlayColor: const Color(0xFFD89A0F).withValues(alpha: 0.1),
+          Row(
+            children: [
+              const Text(
+                'THICKNESS',
+                style: TextStyle(
+                  color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500,
+                ),
               ),
-              child: Slider(
-                value: _borderThickness,
-                min: 10,
-                max: 100,
-                onChanged: (v) => setState(() => _borderThickness = v),
+              const SizedBox(width: 8),
+              Text(
+                '${_borderThickness.round()}%',
+                style: const TextStyle(
+                  color: Color(0xFFD89A0F), fontSize: 12, fontWeight: FontWeight.w600,
+                ),
               ),
+              Expanded(child: const SizedBox()),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              activeTrackColor: const Color(0xFFD89A0F),
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+              thumbColor: const Color(0xFFD89A0F),
+              overlayColor: const Color(0xFFD89A0F).withValues(alpha: 0.1),
+            ),
+            child: Slider(
+              value: _borderThickness,
+              min: 10,
+              max: 100,
+              onChanged: (v) => setState(() => _borderThickness = v),
             ),
           ),
         ],
@@ -322,7 +317,7 @@ class _BordersScreenState extends State<BordersScreen> {
   void _onSave() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('已保存 $_selectedBorder (${_borderThickness.round()}%)'),
+        content: Text('已保存 (${_borderThickness.round()}%)'),
         backgroundColor: const Color(0xFF2E7D32),
         duration: const Duration(seconds: 1),
       ),
