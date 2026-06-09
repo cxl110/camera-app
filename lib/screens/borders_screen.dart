@@ -27,12 +27,23 @@ class _BordersScreenState extends State<BordersScreen> {
   double _borderThickness = 100;
 
   static const _borderFiles = [
-    'frame_00.png', 'frame_06.png', 'frame_07.png', 'frame_09.png',
-    'frame_10.png', 'frame_11.png', 'frame_12.png', 'frame_13.png',
-    'frame_14.png', 'frame_16.png', 'frame_17.png', 'frame_18.png',
-    'frame_19.png', 'frame_21.png', 'frame_22.png', 'frame_23.png',
-    'frame_24.png', 'frame_25.png', 'frame_26.png', 'frame_27.png',
-    'kodak 400 52.png', 'kodak 400 52_2.png',
+    'frame_19.png',  // 50% border
+    'frame_25.png',  // 37%
+    'frame_24.png',  // 36%
+    'frame_26.png',  // 36%
+    'frame_20.png',  // 35%
+    'frame_21.png',  // 34%
+    'frame_22.png',  // 34%
+    'frame_23.png',  // 34%
+    'frame_18.png',  // 34%
+    'frame_06.png',  // 33%
+    'frame_11.png',  // 33%
+    'frame_27.png',  // 32%
+    'frame_10.png',  // 31%
+    'frame_09.png',  // 29%
+    'frame_28.png',  // 29%
+    'frame_13.png',  // 26%
+    'kodak 400 52.png',  // 24%
   ];
 
   @override
@@ -95,10 +106,11 @@ class _BordersScreenState extends State<BordersScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 24),
                     _buildBorderRow(),
-                    const SizedBox(height: 36),
-                    _buildThicknessControl(),
+                    // THICKNESS — disabled for now
+                    // const SizedBox(height: 36),
+                    // _buildThicknessControl(),
                   ],
                 ),
               ),
@@ -159,43 +171,40 @@ class _BordersScreenState extends State<BordersScreen> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(7),
-        child: _previewImage != null
-            ? Stack(
-                fit: StackFit.expand,
-                children: [
-                  // Photo layer
-                  Image.memory(_previewImage!, fit: BoxFit.contain),
-                  // Border overlay layer
-                  if (_selectedBorder != null)
-                    _buildBorderOverlay(),
-                ],
-              )
-            : Center(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Background: photo or black (stretched to fill)
+          if (_previewImage != null)
+            Positioned.fill(
+              child: Image.memory(_previewImage!, fit: BoxFit.fill),
+            )
+          else
+            Positioned.fill(
+              child: Container(color: Colors.black),
+            ),
+          // Border overlay — fills entire area edge to edge
+          if (_selectedBorder != null)
+            Positioned.fill(
+              child: _buildBorderOverlay(),
+            ),
+            // Hint text when no photo
+            if (_previewImage == null && _selectedBorder == null)
+              Center(
                 child: Icon(Icons.image_outlined, size: 64,
                     color: Colors.white.withValues(alpha: 0.1)),
               ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildBorderOverlay() {
-    // Photo stays fixed. Border scales from center:
-    // 100% = original (scale 1.0)
-    // 50%  = thinner (scale 2.0 → border pushed outward → less visible)
-    final scale = 100.0 / _borderThickness;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(7),
-      child: Transform.scale(
-        scale: scale,
-        alignment: Alignment.center,
-        child: Image.asset(
-          'assets/frames/$_selectedBorder',
-          fit: BoxFit.fill,
-          width: double.infinity,
-          height: double.infinity,
-          errorBuilder: (_, __, ___) => const SizedBox(),
-        ),
-      ),
+    return Image.asset(
+      'assets/frames/$_selectedBorder',
+      fit: BoxFit.fill, // fill entire preview area edge-to-edge
+      errorBuilder: (_, __, ___) => const SizedBox(),
     );
   }
 
@@ -219,6 +228,9 @@ class _BordersScreenState extends State<BordersScreen> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             itemCount: _borderFiles.length,
+            // Prevent loading all large PNGs at once
+            addAutomaticKeepAlives: false,
+            addRepaintBoundaries: false,
             itemBuilder: (context, index) {
               final file = _borderFiles[index];
               final isSelected = _selectedBorder == file;
@@ -242,6 +254,7 @@ class _BordersScreenState extends State<BordersScreen> {
                     child: Image.asset(
                       'assets/frames/$file',
                       fit: BoxFit.contain,
+                      cacheWidth: 144, // Downsample for thumbnail
                       errorBuilder: (_, __, ___) => Center(
                         child: Icon(Icons.crop_free, size: 16,
                             color: Colors.white.withValues(alpha: 0.15)),
