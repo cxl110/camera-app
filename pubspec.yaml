@@ -61,6 +61,7 @@ flutter:
 
   assets:
     - assets/models/
+    - assets/frames/
 
 flutter_launcher_icons:
   ios: true

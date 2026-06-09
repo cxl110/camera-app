@@ -1,5 +1,7 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
 import '../widgets/bottom_tabs.dart';
@@ -87,21 +89,18 @@ class _BordersScreenState extends State<BordersScreen> {
             // ── Image Preview (matches EFFECTS 42%) ──
             _buildPreview(),
 
-            // ── Scrollable Content ──
+            // ── Controls ──
             Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  // ── BORDERS (matches FILM PRESETS style) ──
-                  _buildBorderRow(),
-
-                  const SizedBox(height: 2),
-
-                  // ── THICKNESS (matches GRAIN/LIGHT LEAK style) ──
-                  _buildThicknessControl(),
-
-                  const SizedBox(height: 8),
-                ],
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 12),
+                    _buildBorderRow(),
+                    const SizedBox(height: 36),
+                    _buildThicknessControl(),
+                  ],
+                ),
               ),
             ),
 
@@ -158,39 +157,37 @@ class _BordersScreenState extends State<BordersScreen> {
         color: const Color(0xFF1A1A1E),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: _previewImage != null
-          ? Stack(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(7),
-                  child: Image.memory(_previewImage!,
-                      fit: BoxFit.contain,
-                      width: double.infinity,
-                      height: double.infinity),
-                ),
-                if (_selectedBorder != null)
-                  Positioned(
-                    top: 10, left: 10,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        '${_borderThickness.round()}%',
-                        style: const TextStyle(
-                            color: Color(0xFFD89A0F), fontSize: 12,
-                            fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-              ],
-            )
-          : Center(
-              child: Icon(Icons.image_outlined, size: 64,
-                  color: Colors.white.withValues(alpha: 0.1)),
-            ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: _previewImage != null
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Photo layer
+                  Image.memory(_previewImage!, fit: BoxFit.contain),
+                  // Border overlay layer
+                  if (_selectedBorder != null)
+                    _buildBorderOverlay(),
+                ],
+              )
+            : Center(
+                child: Icon(Icons.image_outlined, size: 64,
+                    color: Colors.white.withValues(alpha: 0.1)),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildBorderOverlay() {
+    final scale = _borderThickness / 100.0;
+    return Transform.scale(
+      scale: scale,
+      alignment: Alignment.center,
+      child: Image.asset(
+        'assets/frames/$_selectedBorder',
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const SizedBox(),
+      ),
     );
   }
 
