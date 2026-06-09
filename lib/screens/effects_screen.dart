@@ -69,7 +69,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
           ),
         ),
         bottomNavigationBar: BottomTabs(
-          activeTab: 'effects',
+          activeTab: 'EFFECTS',
           onTabChanged: (tab) => _onTabChanged(tab),
         ),
       );
@@ -128,7 +128,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
             // ── Bottom Tabs ──
             BottomTabs(
-              activeTab: 'effects',
+              activeTab: 'EFFECTS',
               onTabChanged: (tab) => _onTabChanged(tab),
             ),
           ],
@@ -315,7 +315,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   void _onTabChanged(String tab) {
-    if (tab == 'borders') {
+    if (tab == 'BORDERS') {
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -325,14 +325,13 @@ class _EffectsScreenState extends State<EffectsScreen> {
           ),
         ),
       ).then((result) {
-        // If BORDERS page returned with a photo, update our preview
         if (result is Uint8List && mounted) {
           setState(() => _previewImage = result);
         }
       });
       return;
     }
-    if (tab == 'camera') {
+    if (tab == 'CAMERA') {
       Navigator.pop(context);
       return;
     }

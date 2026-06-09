@@ -21,7 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _wifiConnected = true; // Prototype: always connected
   bool _isRecording = false;
   Uint8List? _lastPhoto;
-  String _activeTab = 'camera';
+  String _activeTab = 'CAMERA';
 
   CameraProtocol get _protocol => context.read<CameraProtocol>();
 
@@ -198,11 +198,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onTabChanged(String tab) {
-    if (tab == 'effects') {
+    if (tab == 'EFFECTS') {
       _navigateTo(EffectsScreen(wifiConnected: _wifiConnected));
       return;
     }
-    if (tab == 'borders') {
+    if (tab == 'BORDERS') {
       _navigateTo(BordersScreen(wifiConnected: _wifiConnected));
       return;
     }

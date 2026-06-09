@@ -18,7 +18,7 @@ class CameraPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: isConnected ? const Color(0xFFD89A0F) : const Color(0xFF0A0A0A),
+      color: isConnected ? const Color(0xFFD89A0F) : const Color(0xFF000000),
       child: isConnected
           ? (liveView ?? _buildConnectedPlaceholder())
           : _buildDisconnectedPlaceholder(),
