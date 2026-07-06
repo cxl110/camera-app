@@ -8,6 +8,7 @@ import 'services/camera_protocol.dart';
 import 'services/mock_camera_protocol.dart';
 import 'services/neural_filter_client.dart';
 import 'services/filter_processor.dart';
+import 'services/image_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,10 +38,15 @@ void main() async {
   // Neural filter backend (Python inference server)
   FilterProcessor.setNeuralBackend(NeuralFilterClient());
 
+  // Image service for saving with upscale
+  final imageService = ImageService();
+  await imageService.initialize();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<FilterService>.value(value: filterService),
+        ChangeNotifierProvider<ImageService>.value(value: imageService),
         Provider<CameraProtocol>.value(value: cameraProtocol),
       ],
       child: const CameraApp(),

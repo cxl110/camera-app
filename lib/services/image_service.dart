@@ -5,6 +5,7 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
+import 'neural_filter_client.dart';
 
 /// Manages local photo storage, caching, and image operations.
 class ImageService extends ChangeNotifier {
@@ -41,7 +42,48 @@ class ImageService extends ChangeNotifier {
     return cacheFile;
   }
 
-  /// Save an edited (filtered) image.
+  /// Save a photo with x2 super-resolution upscale.
+  ///
+  /// Tries neural server upscale first, falls back to original if unavailable.
+  /// All save operations should go through this method.
+  Future<File> saveWithUpscale(Uint8List imageBytes, String originalName,
+      {NeuralFilterClient? neuralClient}) async {
+    // Try x2 super-resolution upscale
+    Uint8List finalBytes = imageBytes;
+    if (neuralClient != null) {
+      try {
+        final upscaled = await neuralClient.upscalePhoto(imageBytes);
+        if (upscaled != null) {
+          finalBytes = upscaled;
+        }
+      } catch (_) {
+        // Fall through to original bytes
+      }
+    }
+
+    final name = p.basenameWithoutExtension(originalName);
+    final outputPath = p.join(_editedDir!.path, '${name}_x2.jpg');
+    final file = File(outputPath);
+    await file.writeAsBytes(finalBytes);
+
+    _recentEdits.insert(
+      0,
+      _EditedImage(
+        path: outputPath,
+        originalName: originalName,
+        editedAt: DateTime.now(),
+      ),
+    );
+
+    if (_recentEdits.length > 50) {
+      _recentEdits.removeLast();
+    }
+
+    notifyListeners();
+    return file;
+  }
+
+  /// Save an edited (filtered) image (without upscale).
   Future<File> saveEditedImage(Uint8List bytes, String originalName) async {
     final name = p.basenameWithoutExtension(originalName);
     final outputPath = p.join(_editedDir!.path, '${name}_edited.jpg');
@@ -57,7 +99,6 @@ class ImageService extends ChangeNotifier {
       ),
     );
 
-    // Keep only last 50 edits in memory
     if (_recentEdits.length > 50) {
       _recentEdits.removeLast();
     }

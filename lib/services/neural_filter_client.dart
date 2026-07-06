@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 class NeuralFilterClient {
   final String baseUrl;
 
-  NeuralFilterClient({this.baseUrl = 'http://192.168.101.86:5000'});
+  NeuralFilterClient({this.baseUrl = 'http://localhost:5002'});
 
   /// Check if the neural inference server is reachable.
   Future<bool> isAvailable() async {
@@ -49,6 +49,28 @@ class NeuralFilterClient {
     } catch (_) {
       // Server unreachable — caller should fall back to local processing
     }
+    return null;
+  }
+
+  /// Super-resolution x2 upscale.
+  ///
+  /// Returns upscaled JPEG bytes, or null if server is unavailable.
+  Future<Uint8List?> upscalePhoto(Uint8List imageBytes) async {
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upscale'))
+        ..files.add(http.MultipartFile.fromBytes(
+          'image',
+          imageBytes,
+          filename: 'input.jpg',
+        ));
+
+      final streamedResponse =
+          await request.send().timeout(const Duration(seconds: 120));
+
+      if (streamedResponse.statusCode == 200) {
+        return await streamedResponse.stream.toBytes();
+      }
+    } catch (_) {}
     return null;
   }
 

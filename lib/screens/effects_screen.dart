@@ -7,6 +7,8 @@ import '../widgets/film_presets.dart';
 import '../widgets/grain_control.dart';
 import '../widgets/light_leak_control.dart';
 import '../widgets/bottom_tabs.dart';
+import '../services/image_service.dart';
+import '../services/neural_filter_client.dart';
 import 'borders_screen.dart';
 
 /// EFFECTS filter page.
@@ -301,17 +303,30 @@ class _EffectsScreenState extends State<EffectsScreen> {
     }
   }
 
-  void _onSaveFiltered() {
+  void _onSaveFiltered() async {
     if (_filteredImage == null) return;
-    // In production: save to gallery via platform channel
-    // For web: trigger download
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已保存 $_selectedPreset 滤镜效果'),
-        backgroundColor: const Color(0xFF2E7D32),
-        duration: const Duration(seconds: 1),
-      ),
-    );
+    try {
+      final imageService = context.read<ImageService>();
+      final neuralClient = NeuralFilterClient();
+      final file = await imageService.saveWithUpscale(
+        _filteredImage!,
+        '${_selectedPreset}_${DateTime.now().millisecondsSinceEpoch}',
+        neuralClient: neuralClient,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已保存 $_selectedPreset (x2超分)'),
+          backgroundColor: const Color(0xFF2E7D32),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   void _onTabChanged(String tab) {

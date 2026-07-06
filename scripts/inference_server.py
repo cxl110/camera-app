@@ -23,6 +23,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 import cv2
@@ -35,6 +36,146 @@ from models import FilterSimulation4
 
 app = Flask(__name__)
 CORS(app)
+
+class _ResBlockV2(nn.Module):
+    """ResBlock with inner body Sequential (matching super_image naming)."""
+    def __init__(self, n_feats, res_scale=1):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv2d(n_feats, n_feats, 3, padding=1, bias=True),
+            nn.ReLU(True),
+            nn.Conv2d(n_feats, n_feats, 3, padding=1, bias=True),
+        )
+        self.res_scale = res_scale
+    def forward(self, x):
+        return x + self.body(x) * self.res_scale
+
+class _EDSR(nn.Module):
+    """EDSR-Base x2 — architecture matching saved state_dict keys."""
+    def __init__(self, n_colors=3, n_feats=64, n_resblocks=16, res_scale=1):
+        super().__init__()
+        self.sub_mean = nn.Conv2d(n_colors, n_colors, 1, bias=True)
+        self.add_mean = nn.Conv2d(n_colors, n_colors, 1, bias=True)
+        self.head = nn.Sequential(nn.Conv2d(n_colors, n_feats, 3, padding=1, bias=True))
+        # 16 ResBlocks + 1 extra conv (body.16)
+        blocks = [_ResBlockV2(n_feats, res_scale) for _ in range(n_resblocks)]
+        blocks.append(nn.Conv2d(n_feats, n_feats, 3, padding=1, bias=True))
+        self.body = nn.Sequential(*blocks)
+        # Tail: Sequential(Conv, PixelShuffle, Conv)
+        # Tail: Seq(Conv → PixelShuffle) + Conv
+        self.tail = nn.Sequential(
+            nn.Sequential(
+                nn.Conv2d(n_feats, n_feats * 4, 3, padding=1, bias=True),
+                nn.PixelShuffle(2),
+            ),
+            nn.Conv2d(n_feats, n_colors, 3, padding=1, bias=True),
+        )
+
+    def forward(self, x):
+        x = self.sub_mean(x)
+        x = self.head(x)
+        res = self.body(x)
+        x = self.tail(x + res)
+        x = self.add_mean(x)
+        return x
+
+_sr_model = None
+_sr_device = torch.device('cpu')
+SR_DIR = os.path.join(SCRIPT_DIR, '..', 'pretrained_checkpoints')
+
+def get_sr_model():
+    """Lazy-load super-resolution model (EDSR-Base x2, 1.37M params) from project files."""
+    global _sr_model
+    if _sr_model is not None:
+        return _sr_model
+
+    sr_pt = os.path.join(SR_DIR, 'edsr_base_x2.pt')
+    if not os.path.exists(sr_pt):
+        print(f"  WARNING: SR model not found at {sr_pt}")
+        return None
+
+    try:
+        _sr_model = _EDSR()
+        state = torch.load(sr_pt, map_location=_sr_device, weights_only=True)
+        state = {k.replace('module.', ''): v for k, v in state.items()}
+        _sr_model.load_state_dict(state)
+        _sr_model.eval()
+        print(f"  SR model loaded: EDSR-Base x2 ({sum(p.numel() for p in _sr_model.parameters()):,} params)")
+    except Exception as e:
+        import traceback
+        print(f"  SR model error: {e}")
+        traceback.print_exc()
+        _sr_model = None
+    return _sr_model
+
+def upscale_tile(model, tile):
+    """Upscale a single tile (H, W, 3 RGB array)."""
+    from torchvision.transforms import ToTensor, ToPILImage
+    from PIL import Image as PILImage
+    tensor = ToTensor()(PILImage.fromarray(tile)).unsqueeze(0)
+    with torch.no_grad():
+        output = model(tensor)
+    out = ToPILImage()(output.squeeze(0))
+    return np.array(out, dtype=np.uint8)
+
+def upscale_image(image_bytes, tile_size=800):
+    """
+    Super-resolution x2 upscale using tile-based inference.
+    Prevents OOM on large images.
+    """
+    model = get_sr_model()
+    if model is None:
+        return image_bytes
+
+    try:
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return image_bytes
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        H, W, _ = img_rgb.shape
+
+        # Tile-based upscale
+        out_w, out_h = W * 2, H * 2
+        output = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+
+        step = tile_size
+        overlap = tile_size // 4
+        for y in range(0, H, step):
+            for x in range(0, W, step):
+                # Extract tile with padding
+                y1 = max(0, y - overlap)
+                y2 = min(H, y + step + overlap)
+                x1 = max(0, x - overlap)
+                x2 = min(W, x + step + overlap)
+                tile = img_rgb[y1:y2, x1:x2]
+
+                # Upscale tile (2x)
+                up_tile = upscale_tile(model, tile)
+                th, tw = up_tile.shape[:2]
+
+                # Calculate overlap cropping in output space
+                crop_y1 = overlap * 2 if y > 0 else 0
+                crop_y2 = th - (overlap * 2) if y + step < H else th
+                crop_x1 = overlap * 2 if x > 0 else 0
+                crop_x2 = tw - (overlap * 2) if x + step < W else tw
+
+                # Place in output
+                out_y = y * 2
+                out_x = x * 2
+                out_h_tile = crop_y2 - crop_y1
+                out_w_tile = crop_x2 - crop_x1
+                output[out_y:out_y+out_h_tile, out_x:out_x+out_w_tile] = \
+                    up_tile[crop_y1:crop_y2, crop_x1:crop_x2]
+
+        out_bgr = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+        _, encoded = cv2.imencode('.jpg', out_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        return encoded.tobytes()
+    except Exception as e:
+        import traceback
+        print(f"  Upscale error: {e}")
+        traceback.print_exc()
+        return image_bytes
 
 # ── Configuration ──
 
@@ -194,7 +335,11 @@ def process_image(model, image_bytes, patch_size=448, padding=16):
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok', 'models_loaded': len(_model_cache)})
+    return jsonify({
+        'status': 'ok',
+        'models_loaded': len(_model_cache),
+        'sr_loaded': _sr_model is not None,
+    })
 
 
 @app.route('/filters')
@@ -251,6 +396,27 @@ def apply_filter():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/upscale', methods=['POST'])
+def upscale():
+    """
+    Super-resolution x2 upscale.
+
+    Form fields:
+        image: JPEG file upload
+
+    Returns: JPEG at 2x resolution
+    """
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file'}), 400
+
+    image_bytes = request.files['image'].read()
+    try:
+        result = upscale_image(image_bytes)
+        return send_file(io.BytesIO(result), mimetype='image/jpeg')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/preload', methods=['POST'])
 def preload_models():
     """Preload all filter models into memory."""
@@ -291,6 +457,11 @@ if __name__ == '__main__':
         for name in FILTER_MAP:
             get_model(name)
         print(f"Loaded {len(_model_cache)}/{len(FILTER_MAP)} models")
+    else:
+        # Always preload SR model
+        print("\nLoading super-resolution model (EDSR-Base x2)...")
+        sr = get_sr_model()
+        print(f"  SR model: {'ready' if sr else 'FAILED'}")
 
     print(f"\nServer: http://{args.host}:{args.port}")
     print("Endpoints:")

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
+import '../services/image_service.dart';
+import '../services/neural_filter_client.dart';
 import '../widgets/bottom_tabs.dart';
 
 /// BORDERS page — select film frame overlay and adjust thickness.
@@ -332,13 +334,29 @@ class _BordersScreenState extends State<BordersScreen> {
     }
   }
 
-  void _onSave() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已保存 (${_borderThickness.round()}%)'),
-        backgroundColor: const Color(0xFF2E7D32),
-        duration: const Duration(seconds: 1),
-      ),
-    );
+  void _onSave() async {
+    if (_previewImage == null) return;
+    try {
+      final imageService = context.read<ImageService>();
+      final neuralClient = NeuralFilterClient();
+      final file = await imageService.saveWithUpscale(
+        _previewImage!,
+        'borders_${DateTime.now().millisecondsSinceEpoch}',
+        neuralClient: neuralClient,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已保存 (边框: $_selectedBorder, x2超分)'),
+          backgroundColor: const Color(0xFF2E7D32),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 }
