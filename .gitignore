@@ -43,3 +43,4 @@ Thumbs.db
 *.key
 *.mobileprovision
 *.cer
+server_log.txt
