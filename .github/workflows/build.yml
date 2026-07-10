@@ -21,9 +21,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build iOS (no codesign)
+      - name: Build iOS (debug, no codesign — best for sideloading)
         run: |
-          flutter build ios --release --no-codesign
+          flutter build ios --debug --no-codesign
 
       - name: Package as IPA
         run: |
