@@ -28,19 +28,19 @@ void main() async {
     ),
   );
 
-  // Initialize services
+  // Initialize services safely
   final filterService = FilterService();
-  await filterService.initialize();
+  try {
+    await filterService.initialize();
+  } catch (_) {}
 
-  // Mock camera protocol (swap to HttpCameraProtocol when DIY camera ready)
   final cameraProtocol = MockCameraProtocol();
-
-  // Neural filter backend (Python inference server)
   FilterProcessor.setNeuralBackend(NeuralFilterClient());
 
-  // Image service for saving with upscale
   final imageService = ImageService();
-  await imageService.initialize();
+  try {
+    await imageService.initialize();
+  } catch (_) {}
 
   runApp(
     MultiProvider(
