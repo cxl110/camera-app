@@ -153,11 +153,22 @@ class MockCameraProtocol extends CameraProtocol {
 
       final photos = <CameraPhoto>[];
       for (final xfile in xfiles) {
-        final bytes = await xfile.readAsBytes();
+        var bytes = await xfile.readAsBytes();
         final id = 'GAL_${_uuid.v4().substring(0, 8)}';
         final name = xfile.name;
 
-        // Store for later download
+        // Downsample large images to prevent OOM on mobile
+        try {
+          final decoded = img.decodeImage(bytes);
+          if (decoded != null) {
+            final maxDim = 2048;
+            final resized = (decoded.width > maxDim || decoded.height > maxDim)
+                ? img.copyResize(decoded, width: maxDim)
+                : decoded;
+            bytes = Uint8List.fromList(img.encodeJpg(resized, quality: 90));
+          }
+        } catch (_) { /* keep original if resize fails */ }
+
         _storage.add(_StoredPhoto(
           id: id,
           name: name,
