@@ -28,19 +28,15 @@ void main() async {
     ),
   );
 
-  // Initialize services safely
+  // Initialize services — non-blocking to avoid startup hang
   final filterService = FilterService();
-  try {
-    await filterService.initialize();
-  } catch (_) {}
+  filterService.initialize().catchError((_) {});
 
   final cameraProtocol = MockCameraProtocol();
   FilterProcessor.setNeuralBackend(NeuralFilterClient());
 
   final imageService = ImageService();
-  try {
-    await imageService.initialize();
-  } catch (_) {}
+  imageService.initialize().catchError((_) {});
 
   runApp(
     MultiProvider(

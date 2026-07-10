@@ -145,75 +145,96 @@ class MockCameraProtocol extends CameraProtocol {
     String sort = 'date_desc',
   }) async {
     // Mock: pick from phone gallery
+    List<XFile> xfiles = [];
+
+    // 尝试 pickMultiImage，如果失败则用 pickImage 单张选择
     try {
-      final List<XFile> xfiles = await _picker.pickMultiImage(
+      xfiles = await _picker.pickMultiImage(
         imageQuality: 85,
         limit: limit,
       );
-
-      final photos = <CameraPhoto>[];
-      for (final xfile in xfiles) {
-        var bytes = await xfile.readAsBytes();
-        final id = 'GAL_${_uuid.v4().substring(0, 8)}';
-        final name = xfile.name;
-
-        // Downsample large images to prevent OOM on mobile
-        try {
-          final decoded = img.decodeImage(bytes);
-          if (decoded != null) {
-            final maxDim = 2048;
-            final resized = (decoded.width > maxDim || decoded.height > maxDim)
-                ? img.copyResize(decoded, width: maxDim)
-                : decoded;
-            bytes = Uint8List.fromList(img.encodeJpg(resized, quality: 90));
-          }
-        } catch (_) { /* keep original if resize fails */ }
-
-        _storage.add(_StoredPhoto(
-          id: id,
-          name: name,
-          bytes: bytes,
-          timestamp: DateTime.now(),
-        ));
-
-        photos.add(CameraPhoto(
-          id: id,
-          name: name,
-          sizeBytes: bytes.length,
-          timestamp: DateTime.now(),
-          thumbnail: _generateThumbnail(bytes),
-          fullImage: bytes,
-        ));
-      }
-
-      return PhotoListResult(
-        total: photos.length,
-        offset: offset,
-        limit: limit,
-        photos: photos,
-      );
     } catch (e) {
-      // Return simulated storage if picker fails
-      final photos = _storage
-          .skip(offset)
-          .take(limit)
-          .map((s) => CameraPhoto(
-                id: s.id,
-                name: s.name,
-                sizeBytes: s.bytes.length,
-                timestamp: s.timestamp,
-                thumbnail: _generateThumbnail(s.bytes),
-                fullImage: s.bytes,
-              ))
-          .toList();
-
-      return PhotoListResult(
-        total: _storage.length,
-        offset: offset,
-        limit: limit,
-        photos: photos,
-      );
+      debugPrint('[MockCamera] pickMultiImage failed: $e');
+      // Fallback: 尝试单张选择
+      try {
+        final single = await _picker.pickImage(
+          source: ImageSource.gallery,
+          imageQuality: 85,
+        );
+        if (single != null) {
+          xfiles = [single];
+        }
+      } catch (e2) {
+        debugPrint('[MockCamera] pickImage fallback also failed: $e2');
+      }
     }
+
+    if (xfiles.isEmpty) {
+      // 如果之前已经有缓存的照片，返回缓存
+      if (_storage.isNotEmpty) {
+        final photos = _storage
+            .skip(offset)
+            .take(limit)
+            .map((s) => CameraPhoto(
+                  id: s.id,
+                  name: s.name,
+                  sizeBytes: s.bytes.length,
+                  timestamp: s.timestamp,
+                  thumbnail: _generateThumbnail(s.bytes),
+                  fullImage: s.bytes,
+                ))
+            .toList();
+        return PhotoListResult(
+          total: _storage.length,
+          offset: offset,
+          limit: limit,
+          photos: photos,
+        );
+      }
+      return PhotoListResult(total: 0, offset: offset, limit: limit, photos: []);
+    }
+
+    final photos = <CameraPhoto>[];
+    for (final xfile in xfiles) {
+      var bytes = await xfile.readAsBytes();
+      final id = 'GAL_${_uuid.v4().substring(0, 8)}';
+      final name = xfile.name;
+
+      // Downsample large images to prevent OOM on mobile
+      try {
+        final decoded = img.decodeImage(bytes);
+        if (decoded != null) {
+          final maxDim = 2048;
+          final resized = (decoded.width > maxDim || decoded.height > maxDim)
+              ? img.copyResize(decoded, width: maxDim)
+              : decoded;
+          bytes = Uint8List.fromList(img.encodeJpg(resized, quality: 90));
+        }
+      } catch (_) { /* keep original if resize fails */ }
+
+      _storage.add(_StoredPhoto(
+        id: id,
+        name: name,
+        bytes: bytes,
+        timestamp: DateTime.now(),
+      ));
+
+      photos.add(CameraPhoto(
+        id: id,
+        name: name,
+        sizeBytes: bytes.length,
+        timestamp: DateTime.now(),
+        thumbnail: _generateThumbnail(bytes),
+        fullImage: bytes,
+      ));
+    }
+
+    return PhotoListResult(
+      total: photos.length,
+      offset: offset,
+      limit: limit,
+      photos: photos,
+    );
   }
 
   @override

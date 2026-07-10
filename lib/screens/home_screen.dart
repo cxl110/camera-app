@@ -105,6 +105,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onOpenGallery() async {
+    // 显示加载提示
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('正在打开相册...'),
+        backgroundColor: Color(0xFF1A1A2E),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
     try {
       final result = await _protocol.listPhotos(limit: 20);
       if (!mounted) return;
@@ -112,12 +122,19 @@ class _HomeScreenState extends State<HomeScreen> {
       if (result.photos.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('相册为空'),
+            content: Text('未选择照片或相册为空'),
             backgroundColor: Color(0xFF1A1A2E),
+            duration: Duration(seconds: 2),
           ),
         );
         return;
       }
+
+      // 显示第一张照片的缩略图
+      setState(() {
+        _lastPhoto = result.photos.first.thumbnail ?? result.photos.first.fullImage;
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('已加载 ${result.photos.length} 张照片'),
@@ -128,8 +145,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('加载失败: $e'),
+          content: Text('加载失败，请重试'),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 2),
         ),
       );
     }
