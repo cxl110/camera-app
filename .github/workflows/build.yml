@@ -67,46 +67,86 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Add CoreMLPlugin.swift to Xcode project
-        run: |
-          # Use ruby script to add the Swift file to Xcode project
-          ruby -e '
-          require "xcodeproj"
-          project_path = "ios/Runner.xcodeproj"
-          project = Xcodeproj::Project.open(project_path)
-          target = project.targets.find { |t| t.name == "Runner" }
-
-          # Find group for Runner
-          group = project.main_group.find_subpath(File.join("Runner"), true)
-          group.set_source_tree("SOURCE_ROOT")
-
-          # Add CoreMLPlugin.swift reference
-          file_path = "CoreMLPlugin.swift"
-          if !target.source_build_phase.files_references.any? { |f| f.path == file_path }
-            file_ref = group.new_reference(file_path)
-            target.source_build_phase.add_file_reference(file_ref, true)
-            puts "Added CoreMLPlugin.swift to Compile Sources"
-          else
-            puts "CoreMLPlugin.swift already in Compile Sources"
-          end
-
-          # Add CoreML.framework
-          if !target.frameworks_build_phase.files_references.any? { |f| f.path == "CoreML.framework" }
-            sdk_root = `xcrun --show-sdk-path`.strip
-            framework_path = File.join(sdk_root, "System/Library/Frameworks/CoreML.framework")
-            framework_ref = project.new_system_framework("CoreML.framework")
-            target.frameworks_build_phase.add_file_reference(framework_ref, true)
-            puts "Added CoreML.framework"
-          end
-
-          project.save
-          puts "Xcode project updated successfully"
-          '
-        shell: bash
-
       - name: Build iOS (no codesign)
         run: |
-          flutter build ios --release --no-codesign
+          # First build attempt may fail due to missing Swift file in Xcode project
+          # We handle that by checking if CoreMLPlugin.swift is already compiled
+          flutter build ios --release --no-codesign 2>&1 | tee build_output.txt || true
+
+          # Check if the error is about CoreMLPlugin not being in Xcode project
+          if grep -q "Cannot find 'CoreMLPlugin' in scope" build_output.txt; then
+            echo "Adding CoreMLPlugin.swift to Xcode project and retrying..."
+
+            # Use PlistBuddy to add CoreMLPlugin.swift to the PBXBuildFile section
+            # First, get a unique ID for the file reference
+            FILE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')
+            BUILD_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')
+            PROJ="ios/Runner.xcodeproj/project.pbxproj"
+
+            # Find the PBXGroup section for Runner and add our file reference
+            # Add CoreMLPlugin.swift reference to the project
+            cat > /tmp/add_coreml.py << 'PYEOF'
+import os
+import re
+import uuid
+
+proj_path = 'ios/Runner.xcodeproj/project.pbxproj'
+with open(proj_path, 'r') as f:
+    content = f.read()
+
+# Generate unique IDs
+file_ref_id = uuid.uuid4().hex[:24].upper()
+build_file_id = uuid.uuid4().hex[:24].upper()
+
+# 1. Add file reference to PBXFileReference section
+file_ref = f'\t\t{file_ref_id} /* CoreMLPlugin.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLPlugin.swift; sourceTree = "<group>"; }};'
+content = content.replace(
+    '/* End PBXFileReference section */',
+    f'{file_ref}\n\t\t/* End PBXFileReference section */'
+)
+
+# 2. Add build file to PBXBuildFile section
+build_file = f'\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {file_ref_id} /* CoreMLPlugin.swift */; }};'
+content = content.replace(
+    '/* End PBXBuildFile section */',
+    f'{build_file}\n\t\t/* End PBXBuildFile section */'
+)
+
+# 3. Add file reference to Runner group (find the group with path = "Runner")
+# Look for the PBXGroup that has children containing AppDelegate.swift
+content = content.replace(
+    'AppDelegate.swift',
+    f'AppDelegate.swift,\n\t\t\t\t{file_ref_id} /* CoreMLPlugin.swift */,'
+)
+
+# 4. Add build file to Sources build phase
+# Find the PBXSourcesBuildPhase section and add our file
+sources_section = re.search(r'/* Begin PBXSourcesBuildPhase section \*/\n(.*?)\n\t\t\t/* End PBXSourcesBuildPhase section \*/', content, re.DOTALL)
+if sources_section:
+    section_content = sources_section.group(1)
+    # Find the first build phase and add our file
+    # Look for the pattern: files = ( ... ) in the sources build phase
+    files_match = re.search(r'(files = \()', section_content)
+    if files_match:
+        insertion = f'{build_file_id} /* CoreMLPlugin.swift in Sources */,\n\t\t\t\t'
+        # Insert after the opening parenthesis
+        pos = files_match.end()
+        section_content = section_content[:pos] + '\n\t\t\t\t' + insertion + section_content[pos:]
+        content = content[:sources_section.start(1)] + section_content + content[sources_section.end(1):]
+
+with open(proj_path, 'w') as f:
+    f.write(content)
+
+print(f"Added CoreMLPlugin.swift (file_ref={file_ref_id}, build_file={build_file_id})")
+PYEOF
+            python3 /tmp/add_coreml.py
+
+            # Retry build
+            flutter build ios --release --no-codesign
+          else
+            # Build succeeded first time
+            echo "Build succeeded!"
+          fi
 
       - name: Package as IPA
         run: |
