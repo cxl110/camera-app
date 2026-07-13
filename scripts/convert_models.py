@@ -82,6 +82,10 @@ EDSR_CONFIG = {
     'name': 'edsr_base_x2',
     'input_size': 224,  # 224x224 input → 448x448 output per tile
     'description': 'EDSR-Base x2 super-resolution upscale',
+    'n_resblocks': 16,
+    'n_feats': 64,
+    'scale': 2,
+    'res_scale': 1.0,
 }
 
 
@@ -115,60 +119,94 @@ def convert_edsr_model(checkpoint_path: str, output_path: str, input_size: int =
     import torch.nn.functional as F
 
     class _EDSR(nn.Module):
-        """EDSR-Base x2 super-resolution model."""
+        """EDSR-Base x2 super-resolution model.
 
-        def __init__(self, n_colors=3, n_feats=64, n_resblocks=16, scale=2):
+        Matches the structure of the eugenesiow/edsr-base checkpoint, which
+        wraps keys under 'module.' and uses a Sequential for the head, body
+        residual blocks, and tail.
+        """
+
+        def __init__(self, n_colors=3, n_feats=64, n_resblocks=16, scale=2, res_scale=1.0):
             super().__init__()
-            # Mean shift
-            rgb_mean = torch.tensor([0.4488, 0.4371, 0.4040]).view(1, 3, 1, 1)
-            rgb_std = torch.tensor([1.0, 1.0, 1.0]).view(1, 3, 1, 1)
-            self.register_buffer('rgb_mean', rgb_mean)
-            self.register_buffer('rgb_std', rgb_std)
+            self.res_scale = res_scale
 
-            # Head
-            self.head = nn.Conv2d(n_colors, n_feats, kernel_size=3, padding=1)
+            # Mean shift implemented as 1x1 convolutions to match checkpoint keys
+            self.sub_mean = nn.Conv2d(n_colors, n_colors, kernel_size=1, bias=True)
+            self.add_mean = nn.Conv2d(n_colors, n_colors, kernel_size=1, bias=True)
 
-            # Body: residual blocks
+            # Head: Sequential wrapping a single conv to match 'head.0'
+            self.head = nn.Sequential(
+                nn.Conv2d(n_colors, n_feats, kernel_size=3, padding=1)
+            )
+
+            # Body: residual blocks. Checkpoint keys are 'body.X.body.0' and 'body.X.body.2'
             self.body = nn.ModuleList([
                 nn.Sequential(
                     OrderedDict([
-                        (f'conv1', nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)),
-                        (f'relu', nn.ReLU(True)),
-                        (f'conv2', nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)),
+                        ('body_0', nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)),
+                        ('relu', nn.ReLU(True)),
+                        ('body_2', nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)),
                     ])
                 ) for _ in range(n_resblocks)
             ])
+            # Final body conv, checkpoint key 'body.16'
             self.body_last = nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)
 
-            # Tail: upscale
+            # Tail: upscale. Checkpoint keys 'tail.0.0' and 'tail.1'
             self.tail = nn.Sequential(
-                nn.Conv2d(n_feats, n_feats * scale * scale, kernel_size=3, padding=1),
-                nn.PixelShuffle(scale),
-                nn.Conv2d(n_feats, n_colors, kernel_size=3, padding=1),
+                OrderedDict([
+                    ('tail_0', nn.Sequential(
+                        nn.Conv2d(n_feats, n_feats * scale * scale, kernel_size=3, padding=1),
+                        nn.PixelShuffle(scale),
+                    )),
+                    ('tail_1', nn.Conv2d(n_feats, n_colors, kernel_size=3, padding=1)),
+                ])
             )
 
         def forward(self, x):
-            # Normalize
-            x = (x - self.rgb_mean) / self.rgb_std
+            # Mean subtraction
+            x = self.sub_mean(x)
             # Head
             x = self.head(x)
-            # Body
+            # Body with global residual
             residual = x
             for block in self.body:
-                x = block(x) + x
+                x = block(x) * self.res_scale + x
             x = self.body_last(x) + residual
             # Tail
             x = self.tail(x)
-            # Denormalize
-            x = x * self.rgb_std + self.rgb_mean
+            # Mean addition
+            x = self.add_mean(x)
             return x
 
     # Load model
-    model = _EDSR()
+    model = _EDSR(res_scale=EDSR_CONFIG.get('res_scale', 1.0))
     if os.path.exists(checkpoint_path):
         state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
-        model.load_state_dict(state_dict)
-        print(f"  Loaded checkpoint successfully")
+
+        # Remove 'module.' prefix from DataParallel checkpoints
+        cleaned = OrderedDict()
+        for k, v in state_dict.items():
+            new_key = k
+            if new_key.startswith('module.'):
+                new_key = new_key[7:]
+            # Map residual block keys: body.X.body.0 / body.X.body.2 -> body.X.body_0 / body.X.body_2
+            new_key = new_key.replace('.body.0.', '.body_0.')
+            new_key = new_key.replace('.body.2.', '.body_2.')
+            # Map tail keys: tail.0.0 -> tail.tail_0.0, tail.1 -> tail.tail_1
+            if new_key.startswith('tail.0.'):
+                new_key = 'tail.tail_0.' + new_key[7:]
+            elif new_key.startswith('tail.1.'):
+                new_key = 'tail.tail_1.' + new_key[7:]
+            cleaned[new_key] = v
+
+        missing, unexpected = model.load_state_dict(cleaned, strict=False)
+        if missing:
+            print(f"  Missing keys: {missing[:5]}...")
+        if unexpected:
+            print(f"  Unexpected keys: {unexpected[:5]}...")
+        if not missing and not unexpected:
+            print(f"  Loaded checkpoint successfully")
     else:
         print(f"  WARNING: Checkpoint not found: {checkpoint_path}")
         print(f"  Using untrained model weights (random)")
