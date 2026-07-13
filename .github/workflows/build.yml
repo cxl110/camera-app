@@ -18,12 +18,65 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install Python dependencies
+        run: |
+          pip install coremltools torch torchvision numpy pillow tqdm
+
+      - name: Check for existing CoreML models
+        id: check_models
+        run: |
+          if ls assets/models/*.mlmodelc 2>/dev/null | head -1; then
+            echo "models_exist=true" >> $GITHUB_OUTPUT
+            echo "CoreML models found, skipping conversion"
+          else
+            echo "models_exist=false" >> $GITHUB_OUTPUT
+            echo "No CoreML models found, running conversion"
+          fi
+
+      - name: Clone filter4free checkpoints
+        if: steps.check_models.outputs.models_exist == 'false'
+        run: |
+          git clone --depth 1 https://github.com/cxl110/filter4free.git /tmp/filter4free
+          cp -r /tmp/filter4free/gui/static/checkpoints ./filter4free_checkpoints || true
+          cp -r /tmp/filter4free/models.py ./filter4free/ || true
+
+      - name: Convert Filter4Free models to CoreML
+        if: steps.check_models.outputs.models_exist == 'false'
+        run: |
+          python scripts/convert_models.py \
+            --checkpoints-dir ./filter4free_checkpoints \
+            --output-dir ./assets/models \
+            --force
+
+      - name: Convert EDSR model to CoreML
+        if: steps.check_models.outputs.models_exist == 'false'
+        run: |
+          python scripts/convert_models.py \
+            --checkpoints-dir ./pretrained_checkpoints \
+            --output-dir ./assets/models \
+            --convert-edsr \
+            --force
+
+      - name: List converted models
+        run: |
+          echo "=== CoreML models ==="
+          ls -lh assets/models/*.mlmodel 2>/dev/null || echo "No .mlmodel files"
+          ls -lh assets/models/*.mlmodelc 2>/dev/null || echo "No .mlmodelc files"
+
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build iOS (no codesign)
         run: |
           flutter build ios --release --no-codesign
+
+      - name: Copy models to iOS bundle
+        run: |
+          # Copy .mlmodelc files to the iOS app bundle for native CoreML loading
+          IOS_BUNDLE="build/ios/iphoneos/Runner.app"
+          mkdir -p "$IOS_BUNDLE"
+          # Models are accessible via Flutter assets, no need to copy separately
+          # The CoreMLPlugin.swift also checks flutter_assets/assets/models/ path
 
       - name: Package as IPA
         run: |

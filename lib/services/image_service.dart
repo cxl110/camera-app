@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import 'neural_filter_client.dart';
+import 'coreml_bridge.dart';
 
 /// Manages local photo storage, caching, and image operations.
 class ImageService extends ChangeNotifier {
@@ -100,13 +101,25 @@ class ImageService extends ChangeNotifier {
 
   /// Save a photo with x2 super-resolution upscale.
   ///
-  /// Tries neural server upscale first, falls back to original if unavailable.
+  /// Tries CoreML on-device upscale first, then neural server, falls back to original.
   /// All save operations should go through this method.
   Future<File> saveWithUpscale(Uint8List imageBytes, String originalName,
       {NeuralFilterClient? neuralClient}) async {
-    // Try x2 super-resolution upscale
+    // Try x2 super-resolution upscale — CoreML first (on-device)
     Uint8List finalBytes = imageBytes;
-    if (neuralClient != null) {
+
+    // Try CoreML on-device upscale
+    try {
+      final coremlUpscaled = await CoreMLBridge.upscalePhoto(imageBytes: imageBytes);
+      if (coremlUpscaled != null) {
+        finalBytes = coremlUpscaled;
+      }
+    } catch (_) {
+      // Fall through to neural server
+    }
+
+    // Fallback: try neural server
+    if (identical(finalBytes, imageBytes) && neuralClient != null) {
       try {
         final upscaled = await neuralClient.upscalePhoto(imageBytes);
         if (upscaled != null) {

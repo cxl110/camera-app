@@ -1,6 +1,6 @@
 name: camera_app
 description: 相机伴侣 - WiFi连接相机，AI滤镜编辑，水印，分享
-version: 0.4.0+4
+version: 1.0.0+5
 publish_to: none
 
 environment:

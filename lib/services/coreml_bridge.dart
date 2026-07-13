@@ -124,6 +124,24 @@ class CoreMLBridge {
     } catch (_) {}
   }
 
+  /// Apply EDSR-Base x2 super-resolution upscale via CoreML.
+  ///
+  /// Returns upscaled JPEG bytes, or null on failure.
+  static Future<Uint8List?> upscalePhoto({
+    required Uint8List imageBytes,
+  }) async {
+    if (!await isAvailable) return null;
+
+    try {
+      final result = await _channel.invokeMethod<Uint8List>('upscalePhoto', {
+        'imageBytes': imageBytes,
+      });
+      return result;
+    } catch (e) {
+      return null;
+    }
+  }
+
   /// Get list of available CoreML models bundled with the app.
   static Future<List<String>> getAvailableModels() async {
     if (!await isAvailable) return [];

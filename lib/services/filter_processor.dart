@@ -1,13 +1,15 @@
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'neural_filter_client.dart';
+import 'coreml_bridge.dart';
 
 /// Applies film simulation filters to images.
 ///
-/// Filter processing — tries neural server first, falls back to local simulation.
+/// Filter processing — tries CoreML first, then neural server, then local simulation.
 ///
-/// 1. NeuralFilterClient (Python inference_server.py) — real AI inference
-/// 2. Dart color matrix — local simulation fallback
+/// 1. CoreMLBridge (iOS native) — on-device AI inference via ANE
+/// 2. NeuralFilterClient (Python inference_server.py) — remote AI inference
+/// 3. Dart color matrix — local simulation fallback
 class FilterProcessor {
   static NeuralFilterClient? _neuralClient;
 
@@ -23,9 +25,21 @@ class FilterProcessor {
   }
 
   /// Apply a named film filter to image bytes.
-  /// Tries neural inference first, falls back to local simulation.
+  /// Tries CoreML first, then neural inference, falls back to local simulation.
   static Future<Uint8List> apply(Uint8List input, String filterName) async {
-    // Try neural backend first
+    // Try CoreML first (on-device, fastest)
+    try {
+      final modelName = _filterNameToModelName(filterName);
+      final coremlResult = await CoreMLBridge.applyFilter(
+        imageBytes: input,
+        modelName: modelName,
+      );
+      if (coremlResult != null) return coremlResult;
+    } catch (_) {
+      // CoreML not available, fall through
+    }
+
+    // Try neural backend second
     if (_neuralClient != null) {
       final result = await _neuralClient!.applyFilter(
         imageBytes: input,
@@ -37,6 +51,35 @@ class FilterProcessor {
 
     // Fallback to local color matrix simulation
     return _applyLocal(input, filterName);
+  }
+
+  /// Convert display filter name to CoreML model name.
+  static String _filterNameToModelName(String filterName) {
+    // Map from display names used in EffectsScreen to model file names
+    const nameMap = {
+      'ACROS': 'fuji_acros',
+      'CLASSIC CHROME': 'fuji_classic_chrome',
+      'ETERNA': 'fuji_eterna',
+      'ETERNA BLEACH BYPASS': 'fuji_eterna_bleach',
+      'CLASSIC Neg.': 'fuji_classic_neg',
+      'PRO Neg.Hi': 'fuji_pro_neg_hi',
+      'NOSTALGIC Neg.': 'fuji_nostalgic_neg',
+      'PRO Neg.Std': 'fuji_pro_neg_std',
+      'ASTIA': 'fuji_astia',
+      'PROVIA': 'fuji_provia',
+      'VELVIA': 'fuji_velvia',
+      'Pro 400H': 'fuji_pro400h',
+      'Superia 400': 'fuji_superia400',
+      'reala': 'fuji_reala',
+      'Color Plus': 'kodak_color_plus',
+      'Gold 200': 'kodak_gold200',
+      'Portra 400': 'kodak_portra400',
+      'Portra 160NC': 'kodak_portra160nc',
+      'UltraMax 400': 'kodak_ultramax400',
+      'VIVID': 'olympus_vivid',
+      'Polaroid': 'polaroid',
+    };
+    return nameMap[filterName] ?? filterName.toLowerCase().replaceAll(' ', '_');
   }
 
   /// Local color matrix simulation (fallback).

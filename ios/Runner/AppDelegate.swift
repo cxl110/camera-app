@@ -7,6 +7,10 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // Register CoreMLPlugin
+    let controller = window?.rootViewController as! FlutterViewController
+    CoreMLPlugin.register(with: controller.registrar(forPlugin: "CoreMLPlugin")!)
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

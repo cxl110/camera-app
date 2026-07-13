@@ -66,6 +66,9 @@ class FilterService extends ChangeNotifier {
         final modelName = filterName.replaceAll('-', '_');
         final inputBytes = Uint8List.fromList(img.encodeJpg(oriented, quality: 95));
 
+        // Pre-load model to ensure it's cached
+        await CoreMLBridge.loadModel(modelName);
+
         final coremlResult = await CoreMLBridge.applyFilter(
           imageBytes: inputBytes,
           modelName: modelName,
@@ -95,11 +98,22 @@ class FilterService extends ChangeNotifier {
     // Downsample for fast preview
     final preview = img.copyResize(image,
         width: maxDimension, height: maxDimension);
+    final previewBytes = Uint8List.fromList(img.encodeJpg(preview, quality: 85));
 
-    // TODO: Apply CoreML filter
-    final filtered = preview; // placeholder
+    // Apply CoreML filter on preview
+    final filterName = filterId ?? _selectedFilter?.id;
+    if (filterName != null) {
+      final modelName = filterName.replaceAll('-', '_');
+      final coremlResult = await CoreMLBridge.applyFilterPreview(
+        imageBytes: previewBytes,
+        modelName: modelName,
+        maxDimension: maxDimension,
+      );
+      if (coremlResult != null) return coremlResult;
+    }
 
-    return Uint8List.fromList(img.encodeJpg(filtered, quality: 85));
+    // Fallback: return downsampled preview without filter
+    return previewBytes;
   }
 
   /// Get filters grouped by brand for the filter picker UI.

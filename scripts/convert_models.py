@@ -67,6 +67,150 @@ FILTER_CONFIGS = {
     'polaroid':                (FilterSimulation4, 480, 'Polaroid instant film look'),
 }
 
+# EDSR-Base x2 super-resolution model config
+EDSR_CONFIG = {
+    'name': 'edsr_base_x2',
+    'input_size': 224,  # 224x224 input → 448x448 output per tile
+    'description': 'EDSR-Base x2 super-resolution upscale',
+}
+
+
+def convert_edsr_model(checkpoint_path: str, output_path: str, input_size: int = 224,
+                       version='1.0', author='CameraApp', description=''):
+    """
+    Convert EDSR-Base x2 PyTorch model to CoreML .mlmodel format.
+
+    The EDSR model is defined inline in inference_server.py.
+    It uses a custom _EDSR class with 16 residual blocks.
+
+    Args:
+        checkpoint_path: Path to .pt checkpoint file
+        output_path: Path for output .mlmodel file
+        input_size: Input image size (square)
+        version: Model version string
+        author: Author string
+        description: Model description
+    """
+    print(f"\n{'='*60}")
+    print(f"Converting: EDSR-Base x2")
+    print(f"  Checkpoint: {checkpoint_path}")
+    print(f"  Input size: {input_size}x{input_size} → {input_size*2}x{input_size*2}")
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"  Device: {device}")
+
+    # Import EDSR model definition (added to this script)
+    from collections import OrderedDict
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    class _EDSR(nn.Module):
+        """EDSR-Base x2 super-resolution model."""
+
+        def __init__(self, n_colors=3, n_feats=64, n_resblocks=16, scale=2):
+            super().__init__()
+            # Mean shift
+            rgb_mean = torch.tensor([0.4488, 0.4371, 0.4040]).view(1, 3, 1, 1)
+            rgb_std = torch.tensor([1.0, 1.0, 1.0]).view(1, 3, 1, 1)
+            self.register_buffer('rgb_mean', rgb_mean)
+            self.register_buffer('rgb_std', rgb_std)
+
+            # Head
+            self.head = nn.Conv2d(n_colors, n_feats, kernel_size=3, padding=1)
+
+            # Body: residual blocks
+            self.body = nn.ModuleList([
+                nn.Sequential(
+                    OrderedDict([
+                        (f'conv1', nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)),
+                        (f'relu', nn.ReLU(True)),
+                        (f'conv2', nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)),
+                    ])
+                ) for _ in range(n_resblocks)
+            ])
+            self.body_last = nn.Conv2d(n_feats, n_feats, kernel_size=3, padding=1)
+
+            # Tail: upscale
+            self.tail = nn.Sequential(
+                nn.Conv2d(n_feats, n_feats * scale * scale, kernel_size=3, padding=1),
+                nn.PixelShuffle(scale),
+                nn.Conv2d(n_feats, n_colors, kernel_size=3, padding=1),
+            )
+
+        def forward(self, x):
+            # Normalize
+            x = (x - self.rgb_mean) / self.rgb_std
+            # Head
+            x = self.head(x)
+            # Body
+            residual = x
+            for block in self.body:
+                x = block(x) + x
+            x = self.body_last(x) + residual
+            # Tail
+            x = self.tail(x)
+            # Denormalize
+            x = x * self.rgb_std + self.rgb_mean
+            return x
+
+    # Load model
+    model = _EDSR()
+    if os.path.exists(checkpoint_path):
+        state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        model.load_state_dict(state_dict)
+        print(f"  Loaded checkpoint successfully")
+    else:
+        print(f"  WARNING: Checkpoint not found: {checkpoint_path}")
+        print(f"  Using untrained model weights (random)")
+    model.eval()
+
+    # Create traced model
+    input_tensor = torch.rand(size=(1, 3, input_size, input_size))
+    traced_model = torch.jit.trace(model, input_tensor)
+
+    # Convert to CoreML
+    print(f"  Converting to CoreML...")
+    mlmodel = ct.convert(
+        traced_model,
+        convert_to="neuralnetwork",
+        source='pytorch',
+        inputs=[
+            ct.ImageType(
+                name="input",
+                shape=input_tensor.shape,
+                channel_first=True,
+                color_layout=ct.colorlayout.RGB,
+                scale=1 / 255.0,
+            )
+        ],
+        outputs=[ct.TensorType(name="output")],
+    )
+
+    # Set metadata
+    mlmodel.author = author
+    mlmodel.version = version
+    mlmodel.short_description = description
+    mlmodel.user_defined_metadata['model_type'] = 'super_resolution'
+    mlmodel.user_defined_metadata['scale'] = '2'
+
+    # Save
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    mlmodel.save(output_path)
+    print(f"  Saved to: {output_path}")
+
+    # Compile to .mlmodelc
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['xcrun', 'coremlcompiler', 'compile', output_path, os.path.dirname(output_path)],
+            capture_output=True, text=True, check=True
+        )
+        print(f"  Compiled to .mlmodelc")
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"  Compilation skipped (xcrun not available or failed)")
+
+    return output_path
+
 
 def convert_model(model_class, checkpoint_path, output_path, input_size=480,
                   version='1.0', author='Filter4Free', description=''):
@@ -258,6 +402,11 @@ def main():
         action='store_true',
         help='List all available filters and exit'
     )
+    parser.add_argument(
+        '--convert-edsr',
+        action='store_true',
+        help='Convert EDSR-Base x2 super-resolution model'
+    )
 
     args = parser.parse_args()
 
@@ -265,6 +414,17 @@ def main():
         print("Available filters:")
         for name, (cls, size, desc) in FILTER_CONFIGS.items():
             print(f"  {name:30s} | {cls.__name__:20s} | {size}px | {desc}")
+        return
+
+    if args.convert_edsr:
+        checkpoint_path = os.path.join(args.checkpoints_dir, 'edsr_base_x2.pt')
+        output_path = os.path.join(args.output_dir, 'edsr_base_x2.mlmodel')
+        convert_edsr_model(
+            checkpoint_path=checkpoint_path,
+            output_path=output_path,
+            input_size=EDSR_CONFIG['input_size'],
+            description=EDSR_CONFIG['description'],
+        )
         return
 
     if args.filter:
