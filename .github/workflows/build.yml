@@ -25,7 +25,7 @@ jobs:
       - name: Check for existing CoreML models
         id: check_models
         run: |
-          if ls assets/models/*.mlmodelc 2>/dev/null | head -1; then
+          if [ -f assets/models/edsr_base_x2.mlmodel ]; then
             echo "models_exist=true" >> "$GITHUB_OUTPUT"
             echo "CoreML models found, skipping conversion"
           else
@@ -63,6 +63,8 @@ jobs:
         run: |
           echo "=== CoreML model files ==="
           ls -lh assets/models/ 2>/dev/null || echo "No model files"
+          echo "=== .mlmodelc directories ==="
+          ls -d assets/models/*.mlmodelc/ 2>/dev/null || echo "No .mlmodelc dirs"
 
       - name: Install dependencies
         run: flutter pub get
