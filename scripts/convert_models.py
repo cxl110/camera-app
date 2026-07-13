@@ -346,6 +346,41 @@ def batch_convert(checkpoints_dir: str, output_dir: str, skip_existing: bool = T
                     checkpoint_path = alt_path
                     break
 
+        # Try filter4free directory structure: brand/subdir/filmcnn.pth
+        if not os.path.exists(checkpoint_path):
+            parts = filter_name.split('_', 1)
+            if len(parts) == 2:
+                brand, subdir = parts
+                # Map subdirectory names to filter4free's actual directory names
+                subdir_map = {
+                    'acros': 'acros',
+                    'astia': 'astia',
+                    'classic_chrome': 'classic-chrome',
+                    'classic_neg': 'classic-neg',
+                    'eterna': 'enerna',  # typo in filter4free's directory name
+                    'eterna_bleach': 'eb',
+                    'pro_neg_hi': 'neghi',
+                    'pro_neg_std': 'negstd',
+                    'nostalgic_neg': 'nostalgic-neg',
+                    'pro400h': 'pro400h',
+                    'provia': 'provia',
+                    'reala': 'reala',
+                    'superia400': 'superia400',
+                    'velvia': 'velvia',
+                    'color_plus': 'colorplus',
+                    'gold200': 'gold200',
+                    'portra400': 'portra400',
+                    'portra160nc': 'portra160nc',
+                    'ultramax400': 'ultramax400',
+                    'vivid': 'vivid',
+                    'polaroid': 'polaroid',
+                }
+                actual_subdir = subdir_map.get(subdir, subdir)
+                candidate = os.path.join(checkpoints_dir, brand, actual_subdir, 'filmcnn.pth')
+                if os.path.exists(candidate):
+                    checkpoint_path = candidate
+                    print(f"  Found checkpoint at: {candidate}")
+
         try:
             convert_model(
                 model_class=model_class,
