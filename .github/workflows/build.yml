@@ -20,7 +20,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install coremltools torch torchvision numpy pillow tqdm
+          pip install coremltools torch torchvision numpy pillow tqdm opencv-python-headless
 
       - name: Check for existing CoreML models
         id: check_models

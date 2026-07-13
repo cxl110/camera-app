@@ -18,7 +18,17 @@ import glob
 from pathlib import Path
 
 # Add filter4free to path for model imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'filter4free'))
+# Try both relative to script (camera_app/filter4free/) and
+# relative to repo root (../filter4free/)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+for _path in [
+    os.path.join(_script_dir, '..', 'filter4free'),
+    os.path.join(_script_dir, '..', '..', 'filter4free'),
+    os.path.join(_script_dir, '..', 'filter4free_checkpoints'),
+]:
+    if os.path.isdir(_path):
+        sys.path.insert(0, _path)
+        break
 
 import torch
 import numpy as np
