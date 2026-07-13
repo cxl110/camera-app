@@ -26,10 +26,10 @@ jobs:
         id: check_models
         run: |
           if ls assets/models/*.mlmodelc 2>/dev/null | head -1; then
-            echo "models_exist=true" >> $GITHUB_OUTPUT
+            echo "models_exist=true" >> "$GITHUB_OUTPUT"
             echo "CoreML models found, skipping conversion"
           else
-            echo "models_exist=false" >> $GITHUB_OUTPUT
+            echo "models_exist=false" >> "$GITHUB_OUTPUT"
             echo "No CoreML models found, running conversion"
           fi
 
@@ -48,7 +48,7 @@ jobs:
           python scripts/convert_models.py \
             --checkpoints-dir ./filter4free_checkpoints \
             --output-dir ./assets/models \
-            --force 2>&1 | tail -30
+            --force
 
       - name: Convert EDSR model to CoreML
         if: steps.check_models.outputs.models_exist == 'false'
@@ -57,7 +57,7 @@ jobs:
             --checkpoints-dir ./pretrained_checkpoints \
             --output-dir ./assets/models \
             --convert-edsr \
-            --force 2>&1 | tail -20
+            --force
 
       - name: List converted models
         run: |
@@ -68,55 +68,10 @@ jobs:
         run: flutter pub get
 
       - name: Add CoreMLPlugin.swift to Xcode project
-        run: |
-          python3 -c "
-import os, re, uuid, sys
-
-proj_path = 'ios/Runner.xcodeproj/project.pbxproj'
-with open(proj_path, 'r') as f:
-    content = f.read()
-
-# Check if already added
-if 'CoreMLPlugin.swift' in content:
-    print('CoreMLPlugin.swift already in Xcode project')
-    sys.exit(0)
-
-file_ref_id = uuid.uuid4().hex[:24].upper()
-build_file_id = uuid.uuid4().hex[:24].upper()
-
-# 1. Add to PBXFileReference section
-file_ref = '\t\t' + file_ref_id + ' /* CoreMLPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMLPlugin.swift; sourceTree = \"<group>\"; };\n'
-content = content.replace('/* End PBXFileReference section */', file_ref + '\t\t/* End PBXFileReference section */')
-
-# 2. Add to PBXBuildFile section
-build_file = '\t\t' + build_file_id + ' /* CoreMLPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = ' + file_ref_id + ' /* CoreMLPlugin.swift */; };\n'
-content = content.replace('/* End PBXBuildFile section */', build_file + '\t\t/* End PBXBuildFile section */')
-
-# 3. Add to Runner group (after AppDelegate.swift reference)
-content = content.replace('AppDelegate.swift', 'AppDelegate.swift,\n\t\t\t\t' + file_ref_id + ' /* CoreMLPlugin.swift */,', 1)
-
-# 4. Add to Sources build phase
-sources_section = re.search(r'/* Begin PBXSourcesBuildPhase section \*/\\n(.*?)\n\t\t\t/* End PBXSourcesBuildPhase section \*/', content, re.DOTALL)
-if sources_section:
-    section_content = sources_section.group(1)
-    files_match = re.search(r'\(', section_content)
-    if files_match:
-        insertion = '\\n\t\t\t\t\t' + build_file_id + ' /* CoreMLPlugin.swift in Sources */,'
-        pos = files_match.end()
-        section_content = section_content[:pos] + insertion + section_content[pos:]
-        content = content[:sources_section.start(1)] + section_content + content[sources_section.end(1):]
-
-with open(proj_path, 'w') as f:
-    f.write(content)
-
-print('Successfully added CoreMLPlugin.swift to Xcode project')
-print('File ref ID:', file_ref_id)
-print('Build file ID:', build_file_id)
-"
+        run: python scripts/add_coreml_to_xcode.py
 
       - name: Build iOS (no codesign)
-        run: |
-          flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign
 
       - name: Package as IPA
         run: |
