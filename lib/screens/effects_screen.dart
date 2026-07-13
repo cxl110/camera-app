@@ -29,8 +29,8 @@ class EffectsScreen extends StatefulWidget {
 
 class _EffectsScreenState extends State<EffectsScreen> {
   bool _showBefore = false;
-  Uint8List? _previewImage;       // Original photo
-  Uint8List? _filteredImage;     // After filter applied
+  Uint8List? _filteredImage;      // After filter applied (for BEFORE/AFTER toggle)
+  Uint8List? _filterSource;       // The currentPhoto this filter was computed from
 
   // Film presets
   String _selectedPreset = 'CLASSIC CHROME';
@@ -45,7 +45,26 @@ class _EffectsScreenState extends State<EffectsScreen> {
   String _lightLeakStyle = 'NONE';
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final current = context.read<ImageService>().currentPhoto;
+    // If the shared photo changed underneath us (e.g. new load or border saved),
+    // drop the stale filtered preview and re-apply the current preset.
+    if (current != null &&
+        !identical(current, _filterSource) &&
+        !identical(current, _filteredImage)) {
+      setState(() {
+        _filteredImage = null;
+        _filterSource = current;
+      });
+      _applyFilter(_selectedPreset);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final imageService = context.watch<ImageService>();
+
     // Block access when WiFi is disconnected
     if (!widget.wifiConnected) {
       return Scaffold(
@@ -83,10 +102,10 @@ class _EffectsScreenState extends State<EffectsScreen> {
         child: Column(
           children: [
             // ── Top Bar ──
-            _buildTopBar(),
+            _buildTopBar(imageService),
 
             // ── Image Preview Area (~1/3) ──
-            _buildPreviewArea(),
+            _buildPreviewArea(imageService),
 
             // ── Scrollable Content ──
             Expanded(
@@ -139,7 +158,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildTopBar(ImageService imageService) {
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -160,7 +179,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
           // Save button
           IconButton(
             icon: Icon(Icons.save_alt, color: Colors.white.withValues(alpha: 0.7), size: 22),
-            onPressed: _filteredImage != null ? _onSaveFiltered : null,
+            onPressed: imageService.currentPhoto != null ? _onSaveFiltered : null,
             tooltip: '保存',
           ),
 
@@ -175,7 +194,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
     );
   }
 
-  Widget _buildPreviewArea() {
+  Widget _buildPreviewArea(ImageService imageService) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -186,15 +205,15 @@ class _EffectsScreenState extends State<EffectsScreen> {
       child: Stack(
         children: [
           // Preview image (show filtered by default, original when BEFORE)
-          if (_previewImage != null)
+          if (imageService.currentPhoto != null)
             Positioned.fill(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(7),
                 child: Image.memory(
                   (_showBefore || _filteredImage == null)
-                      ? _previewImage!
+                      ? (imageService.originalPhoto ?? imageService.currentPhoto!)
                       : _filteredImage!,
-                  fit: BoxFit.cover,
+                  fit: BoxFit.contain,
                 ),
               ),
             )
@@ -272,6 +291,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _onOpenAlbum() async {
     final protocol = context.read<CameraProtocol>();
+    final imageService = context.read<ImageService>();
     try {
       final result = await protocol.listPhotos(limit: 20);
       if (!mounted) return;
@@ -279,11 +299,11 @@ class _EffectsScreenState extends State<EffectsScreen> {
       if (result.photos.isNotEmpty) {
         final firstPhoto = result.photos.first;
         if (firstPhoto.fullImage != null) {
+          imageService.loadPhoto(firstPhoto.fullImage!, name: firstPhoto.name);
           setState(() {
-            _previewImage = firstPhoto.fullImage;
-            _showBefore = false;
+            _filteredImage = null;
+            _filterSource = null;
           });
-          _applyFilter(_selectedPreset);
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -304,13 +324,14 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   void _onSaveFiltered() async {
-    if (_filteredImage == null) return;
+    final imageService = context.read<ImageService>();
+    final output = _filteredImage ?? imageService.currentPhoto;
+    if (output == null) return;
     try {
-      final imageService = context.read<ImageService>();
       final neuralClient = NeuralFilterClient();
-      final file = await imageService.saveWithUpscale(
-        _filteredImage!,
-        '${_selectedPreset}_${DateTime.now().millisecondsSinceEpoch}',
+      await imageService.saveWithUpscale(
+        output,
+        imageService.currentPhotoName ?? '${_selectedPreset}_${DateTime.now().millisecondsSinceEpoch}',
         neuralClient: neuralClient,
       );
       if (!mounted) return;
@@ -334,16 +355,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => BordersScreen(
-            wifiConnected: widget.wifiConnected,
-            selectedPhoto: _previewImage,
-          ),
+          builder: (_) => BordersScreen(wifiConnected: widget.wifiConnected),
         ),
-      ).then((result) {
-        if (result is Uint8List && mounted) {
-          setState(() => _previewImage = result);
-        }
-      });
+      );
       return;
     }
     if (tab == 'CAMERA') {
@@ -353,16 +367,21 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   void _applyFilter(String preset) {
-    if (_previewImage == null) return;
-    // 1. Immediately highlight selected preset
+    final imageService = context.read<ImageService>();
+    final source = imageService.currentPhoto;
+    if (source == null) return;
+
+    // Immediately highlight selected preset
     setState(() {
       _selectedPreset = preset;
       _showBefore = false; // show current filtered result while loading
+      _filterSource = source;
     });
-    // 2. Process neural inference in background
-    final bytes = _previewImage!;
-    FilterProcessor.apply(bytes, preset).then((filtered) {
+
+    // Process neural inference in background
+    FilterProcessor.apply(source, preset).then((filtered) {
       if (!mounted) return;
+      imageService.updateCurrentPhoto(filtered); // share with BORDERS
       setState(() => _filteredImage = filtered);
     });
   }

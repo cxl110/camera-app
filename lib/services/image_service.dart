@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -17,6 +18,13 @@ class ImageService extends ChangeNotifier {
   /// Recently edited images for quick access.
   final List<_EditedImage> _recentEdits = [];
 
+  /// Current photo shared across CAMERA / EFFECTS / BORDERS screens.
+  Uint8List? originalPhoto;
+  Uint8List? currentPhoto;
+  String? currentPhotoName;
+
+  bool get hasCurrentPhoto => currentPhoto != null;
+
   bool get isInitialized => _isInitialized;
   List<_EditedImage> get recentEdits => List.unmodifiable(_recentEdits);
 
@@ -32,6 +40,54 @@ class ImageService extends ChangeNotifier {
 
     _isInitialized = true;
     notifyListeners();
+  }
+
+  /// Load a new photo as the shared current photo.
+  ///
+  /// Resets both the original and the working copy.
+  void loadPhoto(Uint8List bytes, {String? name}) {
+    originalPhoto = bytes;
+    currentPhoto = bytes;
+    currentPhotoName = name ?? 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    notifyListeners();
+  }
+
+  /// Update the working copy of the current photo (e.g. after filter/border).
+  void updateCurrentPhoto(Uint8List bytes) {
+    currentPhoto = bytes;
+    notifyListeners();
+  }
+
+  /// Clear the shared current photo.
+  void clearCurrentPhoto() {
+    originalPhoto = null;
+    currentPhoto = null;
+    currentPhotoName = null;
+    notifyListeners();
+  }
+
+  /// Composite a frame PNG over the photo.
+  ///
+  /// The photo itself is not resized or distorted. The frame is stretched to
+  /// match the photo dimensions and then alpha-blended on top.
+  Future<Uint8List> compositeBorder(Uint8List photoBytes, String frameFileName) async {
+    final photo = img.decodeImage(photoBytes);
+    if (photo == null) return photoBytes;
+
+    final frameData = await rootBundle.load('assets/frames/$frameFileName');
+    final frame = img.decodePng(frameData.buffer.asUint8List());
+    if (frame == null) return photoBytes;
+
+    // Stretch frame to photo dimensions (frame may be distorted/cropped).
+    final stretchedFrame = img.copyResize(
+      frame,
+      width: photo.width,
+      height: photo.height,
+    );
+
+    // Alpha-blend the frame on top of the photo.
+    final composited = img.compositeImage(photo, stretchedFrame);
+    return Uint8List.fromList(img.encodeJpg(composited, quality: 95));
   }
 
   /// Cache a downloaded image from a URL.

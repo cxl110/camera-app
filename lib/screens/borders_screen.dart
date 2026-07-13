@@ -1,7 +1,4 @@
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
 import '../services/image_service.dart';
@@ -11,12 +8,10 @@ import '../widgets/bottom_tabs.dart';
 /// BORDERS page — select film frame overlay and adjust thickness.
 class BordersScreen extends StatefulWidget {
   final bool wifiConnected;
-  final Uint8List? selectedPhoto;
 
   const BordersScreen({
     super.key,
     required this.wifiConnected,
-    this.selectedPhoto,
   });
 
   @override
@@ -24,7 +19,6 @@ class BordersScreen extends StatefulWidget {
 }
 
 class _BordersScreenState extends State<BordersScreen> {
-  Uint8List? _previewImage;
   String? _selectedBorder;
   double _borderThickness = 100;
 
@@ -49,15 +43,9 @@ class _BordersScreenState extends State<BordersScreen> {
   ];
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.selectedPhoto != null) {
-      _previewImage = widget.selectedPhoto;
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final imageService = context.watch<ImageService>();
+
     if (!widget.wifiConnected) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
@@ -65,7 +53,7 @@ class _BordersScreenState extends State<BordersScreen> {
           backgroundColor: Colors.transparent,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white54),
-            onPressed: () => Navigator.pop(context, _previewImage),
+            onPressed: () => Navigator.pop(context),
           ),
         ),
         body: Center(
@@ -97,10 +85,10 @@ class _BordersScreenState extends State<BordersScreen> {
         child: Column(
           children: [
             // ── Top Bar (matches EFFECTS) ──
-            _buildTopBar(),
+            _buildTopBar(imageService),
 
             // ── Image Preview (matches EFFECTS 42%) ──
-            _buildPreview(),
+            _buildPreview(imageService),
 
             // ── Controls ──
             Expanded(
@@ -123,7 +111,7 @@ class _BordersScreenState extends State<BordersScreen> {
               activeTab: 'BORDERS',
               onTabChanged: (tab) {
                 if (tab == 'CAMERA') Navigator.popUntil(context, (route) => route.isFirst);
-                if (tab == 'EFFECTS') Navigator.pop(context, _previewImage);
+                if (tab == 'EFFECTS') Navigator.pop(context);
               },
             ),
           ],
@@ -132,7 +120,7 @@ class _BordersScreenState extends State<BordersScreen> {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildTopBar(ImageService imageService) {
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -141,15 +129,17 @@ class _BordersScreenState extends State<BordersScreen> {
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 22),
-            onPressed: () => Navigator.pop(context, _previewImage),
+            onPressed: () => Navigator.pop(context),
             tooltip: '返回',
           ),
           const Spacer(),
           IconButton(
             icon: Icon(Icons.save_alt,
-                color: (_selectedBorder != null ? Colors.white : Colors.white.withValues(alpha: 0.2)).withValues(alpha: 0.7),
+                color: (_selectedBorder != null && imageService.currentPhoto != null
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.2)).withValues(alpha: 0.7),
                 size: 22),
-            onPressed: _selectedBorder != null ? _onSave : null,
+            onPressed: (_selectedBorder != null && imageService.currentPhoto != null) ? _onSave : null,
             tooltip: '保存',
           ),
           IconButton(
@@ -163,7 +153,7 @@ class _BordersScreenState extends State<BordersScreen> {
     );
   }
 
-  Widget _buildPreview() {
+  Widget _buildPreview(ImageService imageService) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -176,22 +166,22 @@ class _BordersScreenState extends State<BordersScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Background: photo or black (stretched to fill)
-          if (_previewImage != null)
-            Positioned.fill(
-              child: Image.memory(_previewImage!, fit: BoxFit.fill),
-            )
-          else
-            Positioned.fill(
-              child: Container(color: Colors.black),
-            ),
-          // Border overlay — fills entire area edge to edge
-          if (_selectedBorder != null)
-            Positioned.fill(
-              child: _buildBorderOverlay(),
-            ),
+            // Background: photo (preserves aspect ratio) or black
+            if (imageService.currentPhoto != null)
+              Positioned.fill(
+                child: Image.memory(imageService.currentPhoto!, fit: BoxFit.contain),
+              )
+            else
+              Positioned.fill(
+                child: Container(color: Colors.black),
+              ),
+            // Border overlay — fills entire area edge to edge (may stretch/crop)
+            if (_selectedBorder != null)
+              Positioned.fill(
+                child: _buildBorderOverlay(),
+              ),
             // Hint text when no photo
-            if (_previewImage == null && _selectedBorder == null)
+            if (!imageService.hasCurrentPhoto && _selectedBorder == null)
               Center(
                 child: Icon(Icons.image_outlined, size: 64,
                     color: Colors.white.withValues(alpha: 0.1)),
@@ -320,11 +310,12 @@ class _BordersScreenState extends State<BordersScreen> {
 
   void _onSelectImage() async {
     final protocol = context.read<CameraProtocol>();
+    final imageService = context.read<ImageService>();
     try {
       final result = await protocol.listPhotos(limit: 20);
       if (!mounted) return;
       if (result.photos.isNotEmpty && result.photos.first.fullImage != null) {
-        setState(() => _previewImage = result.photos.first.fullImage);
+        imageService.loadPhoto(result.photos.first.fullImage!, name: result.photos.first.name);
       }
     } catch (e) {
       if (!mounted) return;
@@ -335,13 +326,19 @@ class _BordersScreenState extends State<BordersScreen> {
   }
 
   void _onSave() async {
-    if (_previewImage == null) return;
+    final imageService = context.read<ImageService>();
+    final base = imageService.currentPhoto;
+    if (base == null || _selectedBorder == null) return;
+
     try {
-      final imageService = context.read<ImageService>();
+      // Composite the frame onto the photo (frame stretched, photo undistorted)
+      final bordered = await imageService.compositeBorder(base, _selectedBorder!);
+      imageService.updateCurrentPhoto(bordered);
+
       final neuralClient = NeuralFilterClient();
-      final file = await imageService.saveWithUpscale(
-        _previewImage!,
-        'borders_${DateTime.now().millisecondsSinceEpoch}',
+      await imageService.saveWithUpscale(
+        bordered,
+        imageService.currentPhotoName ?? 'borders_${DateTime.now().millisecondsSinceEpoch}',
         neuralClient: neuralClient,
       );
       if (!mounted) return;

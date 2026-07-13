@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
+import '../services/image_service.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
@@ -20,7 +21,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _wifiConnected = true; // Prototype: always connected
   bool _isRecording = false;
-  Uint8List? _lastPhoto;
   String _activeTab = 'CAMERA';
 
   CameraProtocol get _protocol => context.read<CameraProtocol>();
@@ -36,11 +36,14 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: CameraPreview(isConnected: _wifiConnected),
             ),
-            CaptureControls(
-              lastPhoto: _lastPhoto,
-              onShutter: _onShutterPressed,
-              onRecord: _onRecordPressed,
-              isRecording: _isRecording,
+            Selector<ImageService, Uint8List?>(
+              selector: (_, service) => service.currentPhoto,
+              builder: (_, currentPhoto, __) => CaptureControls(
+                lastPhoto: currentPhoto,
+                onShutter: _onShutterPressed,
+                onRecord: _onRecordPressed,
+                isRecording: _isRecording,
+              ),
             ),
             const SizedBox(height: 24),
             BottomTabs(
@@ -130,10 +133,12 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // 显示第一张照片的缩略图
-      setState(() {
-        _lastPhoto = result.photos.first.thumbnail ?? result.photos.first.fullImage;
-      });
+      // 加载到共享的当前照片
+      final first = result.photos.first;
+      final bytes = first.fullImage ?? first.thumbnail;
+      if (bytes != null) {
+        context.read<ImageService>().loadPhoto(bytes, name: first.name);
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -157,9 +162,12 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final result = await _protocol.capturePhoto();
       if (!mounted) return;
-      setState(() {
-        _lastPhoto = result.thumbnail ?? result.fullImage;
-      });
+
+      final bytes = result.thumbnail ?? result.fullImage;
+      if (bytes != null) {
+        context.read<ImageService>().loadPhoto(bytes, name: result.name);
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('📸 ${result.name}'),
