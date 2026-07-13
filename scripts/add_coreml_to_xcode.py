@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """Add CoreMLPlugin.swift to Xcode project so it gets compiled.
 
-This script modifies project.pbxproj in a safe way:
-1. Reads the entire file
-2. Uses regex to find exact sections to modify
-3. Only inserts new entries, never modifies existing ones
-4. Validates the file is still parseable afterward
+This script modifies project.pbxproj by inserting new entries at
+specific positions without modifying existing lines.
 """
 
 import os
-import re
 import uuid
 import sys
 
@@ -22,77 +18,67 @@ def main():
         sys.exit(1)
 
     with open(proj_path, 'r') as f:
-        content = f.read()
+        lines = f.readlines()
 
     # Check if already added
-    if 'CoreMLPlugin.swift' in content:
+    if any('CoreMLPlugin.swift' in line for line in lines):
         print('CoreMLPlugin.swift already in Xcode project')
         return
 
     file_ref_id = uuid.uuid4().hex[:24].upper()
     build_file_id = uuid.uuid4().hex[:24].upper()
 
-    # Step 1: Add to PBXFileReference section
-    # Find the last PBXFileReference entry and insert after it
-    file_ref_pattern = re.compile(
-        r'(\t+[A-F0-9]{24} \/\* .*? \*\/ = \{isa = PBXFileReference; .*?; \};)\n(\t\t/\* End PBXFileReference section \*/)',
-        re.DOTALL
-    )
-    file_ref_entry = (
-        f'\t\t{file_ref_id} /* CoreMLPlugin.swift */ = '
-        f'{{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; '
-        f'path = CoreMLPlugin.swift; sourceTree = "<group>"; }};'
-    )
-    content = file_ref_pattern.sub(
-        rf'\1\n\t\t{file_ref_entry}\n\2',
-        content,
-        count=1
-    )
+    new_lines = []
+    in_pbxbuildfile = False
+    in_pbxfileref = False
+    in_group = False
+    in_sources = False
+    in_xcbuildconfig = False
 
-    # Step 2: Add to PBXBuildFile section
-    build_file_pattern = re.compile(
-        r'(\t+[A-F0-9]{24} \/\* .*? \*\/ = \{isa = PBXBuildFile; .*?; \};)\n(\t\t/\* End PBXBuildFile section \*/)',
-        re.DOTALL
-    )
-    build_file_entry = (
-        f'\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */ = '
-        f'{{isa = PBXBuildFile; fileRef = {file_ref_id} /* CoreMLPlugin.swift */; }};'
-    )
-    content = build_file_pattern.sub(
-        rf'\1\n\t\t{build_file_entry}\n\2',
-        content,
-        count=1
-    )
+    for i, line in enumerate(lines):
+        # Track which section we're in
+        if '/* Begin PBXBuildFile section */' in line:
+            in_pbxbuildfile = True
+        elif '/* End PBXBuildFile section */' in line:
+            in_pbxbuildfile = False
+        elif '/* Begin PBXFileReference section */' in line:
+            in_pbxfileref = True
+        elif '/* End PBXFileReference section */' in line:
+            in_pbxfileref = False
 
-    # Step 3: Add file reference to the Runner group
-    # Find the PBXGroup for Runner that contains AppDelegate.swift
-    runner_group_pattern = re.compile(
-        r'(children = \(\n)(.*?AppDelegate\.swift.*?;)',
-        re.DOTALL
-    )
-    content = runner_group_pattern.sub(
-        rf'\1\2\n\t\t\t\t{file_ref_id} /* CoreMLPlugin.swift */,',
-        content,
-        count=1
-    )
+        new_lines.append(line)
 
-    # Step 4: Add build file to PBXSourcesBuildPhase
-    sources_phase_pattern = re.compile(
-        r'/\* Begin PBXSourcesBuildPhase section \*/.*?'
-        r'isa = PBXSourcesBuildPhase;.*?'
-        r'buildActionMask = [0-9]+;.*?'
-        r'files = \(\n(.*?)\);',
-        re.DOTALL
-    )
-    sources_match = sources_phase_pattern.search(content)
-    if sources_match:
-        old_files = sources_match.group(1)
-        new_file_entry = f'\t\t\t\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */,\n'
-        new_files = old_files + new_file_entry
-        content = content[:sources_match.start(1)] + new_files + content[sources_match.end(1):]
+        # Step 1: Add to PBXFileReference section (after Runner-Bridging-Header.h entry)
+        if in_pbxfileref and 'Runner-Bridging-Header.h' in line:
+            file_ref_entry = (
+                f'\t\t{file_ref_id} /* CoreMLPlugin.swift */ = '
+                f'{{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; '
+                f'path = CoreMLPlugin.swift; sourceTree = "<group>"; }};\n'
+            )
+            new_lines.append(file_ref_entry)
+
+        # Step 2: Add to PBXBuildFile section (after AppDelegate.swift in Sources entry)
+        if in_pbxbuildfile and 'AppDelegate.swift' in line and 'PBXBuildFile' in line:
+            build_file_entry = (
+                f'\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */ = '
+                f'{{isa = PBXBuildFile; fileRef = {file_ref_id} /* CoreMLPlugin.swift */; }};\n'
+            )
+            new_lines.append(build_file_entry)
+
+        # Step 3: Add file ref to Runner group children
+        # After the line ending with 'Runner-Bridging-Header.h */,' (group children entry)
+        if line.strip().endswith('/* Runner-Bridging-Header.h */,'):
+            group_entry = f'\t\t\t\t{file_ref_id} /* CoreMLPlugin.swift */,\n'
+            new_lines.append(group_entry)
+
+        # Step 4: Add build file to PBXSourcesBuildPhase
+        # After the line ending with 'SceneDelegate.swift in Sources */,'
+        if line.strip().endswith('/* SceneDelegate.swift in Sources */,'):
+            source_entry = f'\t\t\t\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */,\n'
+            new_lines.append(source_entry)
 
     with open(proj_path, 'w') as f:
-        f.write(content)
+        f.writelines(new_lines)
 
     print(f'Added CoreMLPlugin.swift to Xcode project')
     print(f'  File ref: {file_ref_id}')
