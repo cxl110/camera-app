@@ -33,27 +33,6 @@ jobs:
             echo "No CoreML models found, running conversion"
           fi
 
-      - name: Clone filter4free checkpoints
-        if: steps.check_models.outputs.models_exist == 'false'
-        run: |
-          # Clone filter4free repository to get checkpoints and model definitions
-          # Try multiple sources: GitHub, Gitee
-          if git clone --depth 1 https://github.com/cxl110/filter4free.git /tmp/filter4free 2>/dev/null; then
-            echo "Cloned from GitHub"
-          elif git clone --depth 1 https://gitee.com/mr-chen2026/filter4free.git /tmp/filter4free 2>/dev/null; then
-            echo "Cloned from Gitee"
-          else
-            echo "WARNING: Cannot clone filter4free from any source"
-            exit 1
-          fi
-          # Create checkpoints dir with filter4free structure (brand/subdir/filmcnn.pth)
-          mkdir -p filter4free_checkpoints
-          cp -r /tmp/filter4free/gui/static/checkpoints/* ./filter4free_checkpoints/
-          # Copy models.py for model definitions
-          mkdir -p filter4free
-          cp /tmp/filter4free/models.py ./filter4free/
-          echo "filter4free checkpoints ready"
-
       - name: Convert Filter4Free models to CoreML
         if: steps.check_models.outputs.models_exist == 'false'
         run: |
