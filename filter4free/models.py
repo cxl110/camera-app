@@ -7,7 +7,9 @@ import torch
 import torch.nn as nn
 from torchvision import models, transforms
 
-from utils import to_pil
+# to_pil is not used in this file; keeping the import would require utils.py
+# and its heavy dependencies (cv2, matplotlib) to be present.
+# from utils import to_pil
 
 
 class PConv2d(nn.Module):
