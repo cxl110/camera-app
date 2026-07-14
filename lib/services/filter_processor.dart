@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'neural_filter_client.dart';
@@ -340,5 +341,232 @@ class FilterProcessor {
     return _adjustRGB(src, saturation: 0.75, contrast: 0.85,
         rMul: 1.05, gMul: 0.95, bMul: 0.9, brightness: 0.08,
         rAdd: 10, gAdd: 5, bAdd: -5);
+  }
+
+  // ─── Post-processing: Grain & Light Leak ───
+
+  /// Apply optional film grain and light leak effects to image bytes.
+  ///
+  /// Decodes once, applies grain then light leak, encodes once.
+  /// [grainIntensity] and [lightLeakIntensity] are 0–100.
+  /// [lightLeakRange] controls how far the leak reaches (0–100).
+  static Uint8List applyPostEffects(
+    Uint8List input, {
+    double grainIntensity = 0,
+    double lightLeakIntensity = 0,
+    double lightLeakRange = 50,
+    String lightLeakStyle = 'NONE',
+    String? imageName,
+  }) {
+    if ((grainIntensity <= 0) &&
+        (lightLeakStyle == 'NONE' || lightLeakIntensity <= 0)) {
+      return input;
+    }
+
+    var image = img.decodeImage(input);
+    if (image == null) return input;
+
+    final seed = _deriveSeed(input, imageName);
+
+    if (grainIntensity > 0) {
+      _addGrainToImage(image, grainIntensity, seed);
+    }
+
+    if (lightLeakStyle != 'NONE' && lightLeakIntensity > 0) {
+      _addLightLeakToImage(
+          image, lightLeakStyle, lightLeakRange, lightLeakIntensity, seed + 1);
+    }
+
+    return Uint8List.fromList(img.encodeJpg(image, quality: 95));
+  }
+
+  /// Generate a stable seed so the same photo always gets the same pattern.
+  static int _deriveSeed(Uint8List bytes, String? name) {
+    if (name != null && name.isNotEmpty) {
+      return name.hashCode ^ bytes.length;
+    }
+    var h = bytes.length;
+    final count = min(64, bytes.length);
+    for (var i = 0; i < count; i++) {
+      h = h * 31 + bytes[i];
+    }
+    return h;
+  }
+
+  /// Add luminance-aware monochrome film grain.
+  ///
+  /// Uses a single random noise value per pixel (monochrome) with a midtone
+  /// weighting so grain is most visible in mid-tones and less in shadows /
+  /// highlights — matching real film behavior.
+  static void _addGrainToImage(
+      img.Image image, double intensityPercent, int seed) {
+    final sigma = intensityPercent / 100.0 * 28.0;
+    if (sigma <= 0) return;
+
+    final rand = Random(seed);
+    const inv255 = 1.0 / 255.0;
+
+    for (final p in image) {
+      final r = p.r.toDouble();
+      final g = p.g.toDouble();
+      final b = p.b.toDouble();
+
+      // Luminance-aware: grain is most visible in mid-tones.
+      final luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      final midtoneFactor =
+          1.0 - ((luma * inv255 - 0.5).abs() * 1.4);
+      final factor = midtoneFactor.clamp(0.25, 1.0);
+
+      // Same noise offset for all channels → monochrome grain
+      final noise = _gaussian(rand) * sigma * factor;
+
+      p.setRgba(
+        (r + noise).clamp(0, 255).toInt(),
+        (g + noise).clamp(0, 255).toInt(),
+        (b + noise).clamp(0, 255).toInt(),
+        p.a.toInt(),
+      );
+    }
+  }
+
+  /// Box-Muller transform for Gaussian random numbers.
+  static double _gaussian(Random rand) {
+    final u1 = max(rand.nextDouble(), 1e-10);
+    final u2 = rand.nextDouble();
+    return sqrt(-2.0 * log(u1)) * cos(2.0 * pi * u2);
+  }
+
+  /// Add a light leak overlay starting from a random image edge.
+  ///
+  /// Creates a soft radial gradient on a mask, blurs it, then screen-blends
+  /// the result onto the image. For DOUBLE style, two leaks from opposite
+  /// edges are drawn.
+  static void _addLightLeakToImage(
+    img.Image image,
+    String style,
+    double rangePercent,
+    double intensityPercent,
+    int seed,
+  ) {
+    final rand = Random(seed);
+    final width = image.width;
+    final height = image.height;
+    final maxSide = max(width, height).toDouble();
+    final reach = maxSide * (0.15 + rangePercent / 100.0 * 0.65);
+
+    // Create a transparent RGBA mask
+    var mask = img.Image(width: width, height: height, numChannels: 4);
+    img.fill(mask, color: img.ColorRgba8(0, 0, 0, 0));
+
+    if (style == 'DOUBLE') {
+      _drawRadialLeak(mask, width, height, rand, reach, _leakColor('WARM', rand));
+      _drawRadialLeak(mask, width, height, rand, reach, _leakColor('COOL', rand));
+    } else {
+      _drawRadialLeak(
+          mask, width, height, rand, reach, _leakColor(style, rand));
+    }
+
+    // Soften the leak edges
+    final blurRadius = (reach * 0.18).clamp(15.0, 70.0).toInt();
+    mask = img.gaussianBlur(mask, radius: blurRadius);
+
+    final intensity = intensityPercent / 100.0;
+
+    // Screen blend the leak mask onto the image.
+    // Screen: out = 255 - (255 - base) * (255 - leak) / 255
+    for (final p in image) {
+      final leak = mask.getPixel(p.x, p.y);
+      final lr = leak.r.toDouble() * intensity;
+      final lg = leak.g.toDouble() * intensity;
+      final lb = leak.b.toDouble() * intensity;
+
+      if (lr <= 0 && lg <= 0 && lb <= 0) continue;
+
+      final r = p.r.toDouble();
+      final g = p.g.toDouble();
+      final b = p.b.toDouble();
+
+      p.setRgba(
+        (255.0 - (255.0 - r) * (255.0 - lr) / 255.0).clamp(0, 255).toInt(),
+        (255.0 - (255.0 - g) * (255.0 - lg) / 255.0).clamp(0, 255).toInt(),
+        (255.0 - (255.0 - b) * (255.0 - lb) / 255.0).clamp(0, 255).toInt(),
+        p.a.toInt(),
+      );
+    }
+  }
+
+  /// Draw a radial gradient leak on [mask] centered on a random edge point.
+  static void _drawRadialLeak(
+    img.Image mask,
+    int width,
+    int height,
+    Random rand,
+    double reach,
+    img.Color color,
+  ) {
+    // Pick a random point on one of the four edges
+    final side = rand.nextInt(4);
+    double cx, cy;
+    switch (side) {
+      case 0: // top
+        cx = rand.nextDouble() * width;
+        cy = 0.0;
+        break;
+      case 1: // right
+        cx = width.toDouble();
+        cy = rand.nextDouble() * height;
+        break;
+      case 2: // bottom
+        cx = rand.nextDouble() * width;
+        cy = height.toDouble();
+        break;
+      default: // left
+        cx = 0.0;
+        cy = rand.nextDouble() * height;
+        break;
+    }
+
+    final cr = color.r.toInt();
+    final cg = color.g.toInt();
+    final cb = color.b.toInt();
+
+    for (final p in mask) {
+      final dx = p.x.toDouble() - cx;
+      final dy = p.y.toDouble() - cy;
+      final dist = sqrt(dx * dx + dy * dy);
+      if (dist >= reach) continue;
+
+      final t = 1.0 - (dist / reach);
+      final alpha = (t * t * 255.0).clamp(0, 255).toInt();
+
+      // Accumulate onto mask (needed for DOUBLE style)
+      final existing = mask.getPixel(p.x, p.y);
+      final er = existing.r.toInt();
+      final eg = existing.g.toInt();
+      final eb = existing.b.toInt();
+      final ea = existing.a.toInt();
+
+      p.setRgba(
+        min(255, er + (cr * alpha) ~/ 255),
+        min(255, eg + (cg * alpha) ~/ 255),
+        min(255, eb + (cb * alpha) ~/ 255),
+        min(255, ea + alpha),
+      );
+    }
+  }
+
+  /// Pick a leak color based on style.
+  static img.Color _leakColor(String style, Random rand) {
+    switch (style) {
+      case 'COOL':
+        return img.ColorRgb8(80, 180, 255);
+      case 'RED':
+        return img.ColorRgb8(255, 60, 80);
+      case 'WARM':
+      default:
+        return rand.nextBool()
+            ? img.ColorRgb8(255, 140, 50)
+            : img.ColorRgb8(255, 210, 90);
+    }
   }
 }

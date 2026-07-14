@@ -29,8 +29,9 @@ class EffectsScreen extends StatefulWidget {
 
 class _EffectsScreenState extends State<EffectsScreen> {
   bool _showBefore = false;
-  Uint8List? _filteredImage;      // After filter applied (for BEFORE/AFTER toggle)
-  Uint8List? _filterSource;       // The currentPhoto this filter was computed from
+  Uint8List? _baseFilteredImage;  // Filter result without grain/leak (avoids re-running CoreML)
+  Uint8List? _filteredImage;      // Final result with grain/leak applied (for display)
+  Uint8List? _filterSource;       // The originalPhoto this filter was computed from
 
   // Film presets
   String _selectedPreset = 'CLASSIC CHROME';
@@ -126,8 +127,14 @@ class _EffectsScreenState extends State<EffectsScreen> {
                   GrainControl(
                     enabled: _grainEnabled,
                     intensity: _grainIntensity,
-                    onToggle: (v) => setState(() => _grainEnabled = v),
-                    onIntensityChanged: (v) => setState(() => _grainIntensity = v),
+                    onToggle: (v) {
+                      setState(() => _grainEnabled = v);
+                      _applyPostEffects();
+                    },
+                    onIntensityChanged: (v) {
+                      setState(() => _grainIntensity = v);
+                      _applyPostEffects();
+                    },
                   ),
 
                   const SizedBox(height: 0),
@@ -137,9 +144,18 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     enabled: _lightLeakEnabled,
                     intensity: _lightLeakIntensity,
                     selectedStyle: _lightLeakStyle,
-                    onToggle: (v) => setState(() => _lightLeakEnabled = v),
-                    onIntensityChanged: (v) => setState(() => _lightLeakIntensity = v),
-                    onStyleChanged: (s) => setState(() => _lightLeakStyle = s),
+                    onToggle: (v) {
+                      setState(() => _lightLeakEnabled = v);
+                      _applyPostEffects();
+                    },
+                    onIntensityChanged: (v) {
+                      setState(() => _lightLeakIntensity = v);
+                      _applyPostEffects();
+                    },
+                    onStyleChanged: (s) {
+                      setState(() => _lightLeakStyle = s);
+                      _applyPostEffects();
+                    },
                   ),
 
                   const SizedBox(height: 8),
@@ -287,6 +303,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
           imageService.loadPhoto(firstPhoto.fullImage!, name: firstPhoto.name);
           setState(() {
             _filteredImage = null;
+            _baseFilteredImage = null;
             _filterSource = null;
           });
         }
@@ -368,8 +385,41 @@ class _EffectsScreenState extends State<EffectsScreen> {
     // Process neural inference in background
     FilterProcessor.apply(source, preset).then((filtered) {
       if (!mounted) return;
-      imageService.updateCurrentPhoto(filtered); // share with BORDERS
-      setState(() => _filteredImage = filtered);
+      _baseFilteredImage = filtered;
+      // Now apply grain/leak on top
+      _applyPostEffects();
+    });
+  }
+
+  /// Apply grain and light leak post-processing on top of [_baseFilteredImage].
+  ///
+  /// This is fast (Dart-only pixel ops) and does NOT re-run CoreML,
+  /// so adjusting grain/leak sliders is responsive.
+  void _applyPostEffects() {
+    final base = _baseFilteredImage;
+    if (base == null) return;
+
+    final imageService = context.read<ImageService>();
+
+    final grainI = _grainEnabled ? _grainIntensity : 0.0;
+    final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
+    // Light leak intensity is proportional to range so brighter leaks reach further
+    final leakI = leakRange > 0 ? (30.0 + leakRange * 0.7) : 0.0;
+
+    // Run post-processing asynchronously to avoid jank on the UI thread.
+    Future(() {
+      return FilterProcessor.applyPostEffects(
+        base,
+        grainIntensity: grainI,
+        lightLeakIntensity: leakI,
+        lightLeakRange: leakRange,
+        lightLeakStyle: _lightLeakStyle,
+        imageName: imageService.currentPhotoName,
+      );
+    }).then((result) {
+      if (!mounted) return;
+      imageService.updateCurrentPhoto(result); // share with BORDERS
+      setState(() => _filteredImage = result);
     });
   }
 }
