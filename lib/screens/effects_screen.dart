@@ -368,7 +368,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _applyFilter(String preset) {
     final imageService = context.read<ImageService>();
-    final source = imageService.currentPhoto;
+    // Always apply filter from the ORIGINAL photo, not the already-filtered one.
+    // This prevents stacking filters on top of each other when switching presets.
+    final source = imageService.originalPhoto ?? imageService.currentPhoto;
     if (source == null) return;
 
     // Immediately highlight selected preset
