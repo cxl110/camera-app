@@ -81,13 +81,12 @@ jobs:
 
       - name: Build iOS (no codesign)
         run: |
-          # Build with Xcode directly to avoid Flutter's codesign check
           cd ios
           xcodebuild -workspace Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath ../build/ios \
+            -derivedDataPath ../build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -97,12 +96,13 @@ jobs:
       - name: Package as IPA
         run: |
           mkdir -p Payload
-          APP_PATH=$(find build/ios/Build/Products/Release-iphoneos -name "Runner.app" -type d | head -1)
+          APP_PATH=$(find build -name "Runner.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found in build output"
-            find build/ios -name "*.app" -type d 2>/dev/null
+            echo "ERROR: Runner.app not found"
+            find build -name "*.app" -type d 2>/dev/null
             exit 1
           fi
+          echo "Found: $APP_PATH"
           cp -r "$APP_PATH" Payload/
           zip -r CameraApp.ipa Payload/
           rm -rf Payload
