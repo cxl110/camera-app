@@ -269,21 +269,6 @@ class _EffectsScreenState extends State<EffectsScreen> {
             ),
           ),
 
-          // ── Center: BEFORE/AFTER indicator ──
-          if (_showBefore)
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'BEFORE',
-                  style: TextStyle(color: Colors.white54, fontSize: 14, letterSpacing: 2),
-                ),
-              ),
-            ),
         ],
       ),
     );
