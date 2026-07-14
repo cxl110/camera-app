@@ -81,11 +81,10 @@ jobs:
 
       - name: Build iOS (no codesign)
         run: |
-          flutter build ios --release \
-            --no-codesign \
-            EXPANDED_CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+          # Set a dummy team ID so Flutter's codesign check passes
+          sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "0000000000";/' ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_STYLE = .*/CODE_SIGN_STYLE = Manual;/' ios/Runner.xcodeproj/project.pbxproj
+          flutter build ios --release --no-codesign
 
       - name: Package as IPA
         run: |
