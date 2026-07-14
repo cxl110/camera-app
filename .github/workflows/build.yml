@@ -81,29 +81,14 @@ jobs:
 
       - name: Build iOS (no codesign)
         run: |
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath ../build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            | tail -5
-          cd ..
+          # Disable team requirement in Xcode project
+          sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "";/' ios/Runner.xcodeproj/project.pbxproj
+          flutter build ios --release --no-codesign
 
       - name: Package as IPA
         run: |
           mkdir -p Payload
-          APP_PATH=$(find build -name "Runner.app" -type d 2>/dev/null | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found"
-            find build -name "*.app" -type d 2>/dev/null
-            exit 1
-          fi
-          echo "Found: $APP_PATH"
-          cp -r "$APP_PATH" Payload/
+          cp -r build/ios/iphoneos/Runner.app Payload/
           zip -r CameraApp.ipa Payload/
           rm -rf Payload
 
