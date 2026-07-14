@@ -81,13 +81,17 @@ jobs:
 
       - name: Build iOS (no codesign)
         run: |
-          # Flutter 3.44 checks for DEVELOPMENT_TEAM even with --no-codesign.
-          # Add a dummy team to the Xcode project to satisfy the check.
           PBX="ios/Runner.xcodeproj/project.pbxproj"
-          # Add DEVELOPMENT_TEAM to each build configuration block
-          sed -i '' '/PRODUCT_BUNDLE_IDENTIFIER/a\
-				DEVELOPMENT_TEAM = "0000000000";' "$PBX"
-          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBX"
+          python3 -c "
+          import re
+          with open('$PBX','r') as f: c=f.read()
+          # Add DEVELOPMENT_TEAM after each PRODUCT_BUNDLE_IDENTIFIER
+          c = re.sub(r'(PRODUCT_BUNDLE_IDENTIFIER = .*?;)', r'\1\n\t\t\t\tDEVELOPMENT_TEAM = \"0000000000\";', c)
+          # Set manual signing
+          c = c.replace('CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;')
+          with open('$PBX','w') as f: f.write(c)
+          echo 'Updated pbxproj with DEVELOPMENT_TEAM and Manual signing'
+          "
           flutter build ios --release --no-codesign
 
       - name: Package as IPA
