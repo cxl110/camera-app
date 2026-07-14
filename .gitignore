@@ -44,3 +44,6 @@ Thumbs.db
 *.mobileprovision
 *.cer
 server_log.txt
+
+# Local CI artifacts
+build_artifacts/

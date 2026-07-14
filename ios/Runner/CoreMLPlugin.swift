@@ -79,21 +79,26 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
             result(nil)
 
         case "availableModels":
-            // Return list of bundled model names
-            // Models are stored as .mlmodelc in the app bundle
-            guard let bundlePath = Bundle.main.resourcePath else {
-                result([])
-                return
-            }
+            // Return list of bundled model names from Flutter assets
+            let candidates = [
+                Bundle.main.resourceURL?.appendingPathComponent("Frameworks/App.framework/flutter_assets/assets/models"),
+                Bundle.main.resourceURL?.appendingPathComponent("flutter_assets/assets/models"),
+                Bundle.main.resourceURL,
+            ].compactMap { $0 }
+
             let fileManager = FileManager.default
-            do {
-                let files = try fileManager.contentsOfDirectory(atPath: bundlePath)
-                let models = files.filter { $0.hasSuffix(".mlmodelc") }
-                    .map { $0.replacingOccurrences(of: ".mlmodelc", with: "") }
-                result(models)
-            } catch {
-                result([])
+            var models: [String] = []
+            for dir in candidates {
+                guard fileManager.fileExists(atPath: dir.path) else { continue }
+                do {
+                    let files = try fileManager.contentsOfDirectory(atPath: dir.path)
+                    let found = files
+                        .filter { $0.hasSuffix(".mlmodel") || $0.hasSuffix(".mlmodelc") }
+                        .map { $0.replacingOccurrences(of: ".mlmodelc", with: "").replacingOccurrences(of: ".mlmodel", with: "") }
+                    models.append(contentsOf: found)
+                } catch { }
             }
+            result(Array(Set(models)).sorted())
 
         default:
             result(FlutterMethodNotImplemented)
@@ -171,12 +176,44 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
         } else if let url = Bundle.main.url(forResource: modelName, withExtension: "mlmodel") {
             modelURL = url
         } else {
-            // Fallback: try Flutter assets path
-            let flutterAssetsPath = "flutter_assets/assets/models"
-            if let url = Bundle.main.url(forResource: modelName, withExtension: "mlmodelc", subdirectory: flutterAssetsPath) {
-                modelURL = url
-            } else if let url = Bundle.main.url(forResource: modelName, withExtension: "mlmodel", subdirectory: flutterAssetsPath) {
-                modelURL = url
+            // Fallback: try Flutter assets path. In release builds Flutter assets live
+            // inside App.framework; in some configurations they may be directly under
+            // the main bundle.
+            let flutterAssetsSubdirs = [
+                "Frameworks/App.framework/flutter_assets/assets/models",
+                "flutter_assets/assets/models",
+            ]
+            var foundURL: URL?
+            for subdir in flutterAssetsSubdirs {
+                if let url = Bundle.main.url(forResource: modelName, withExtension: "mlmodelc", subdirectory: subdir) {
+                    foundURL = url
+                    break
+                }
+                if let url = Bundle.main.url(forResource: modelName, withExtension: "mlmodel", subdirectory: subdir) {
+                    foundURL = url
+                    break
+                }
+            }
+            if foundURL == nil {
+                // Last resort: enumerate the assets directory and look for the file.
+                let candidates = [
+                    Bundle.main.resourceURL?.appendingPathComponent("Frameworks/App.framework/flutter_assets/assets/models"),
+                    Bundle.main.resourceURL?.appendingPathComponent("flutter_assets/assets/models"),
+                ].compactMap { $0 }
+                for dir in candidates {
+                    let mlmodel = dir.appendingPathComponent("\(modelName).mlmodel")
+                    let mlmodelc = dir.appendingPathComponent("\(modelName).mlmodelc")
+                    if FileManager.default.fileExists(atPath: mlmodel.path) {
+                        foundURL = mlmodel
+                        break
+                    } else if FileManager.default.fileExists(atPath: mlmodelc.path) {
+                        foundURL = mlmodelc
+                        break
+                    }
+                }
+            }
+            if let foundURL = foundURL {
+                modelURL = foundURL
             } else {
                 throw CoreMLError.modelNotFound(modelName)
             }
@@ -265,13 +302,14 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     return
                 }
 
-                // For EDSR, use tile-based inference with larger tiles
-                // since the model does 2x upscaling
+                // For EDSR, use tile-based inference. The model does 2x upscaling
+                // (224 input -> 448 output), so the output scale is 2.
                 let result = try self?.processTiled(
                     image: image,
                     model: model,
-                    patchSize: 224,  // 224 input → 448 output per tile
-                    padding: 16
+                    patchSize: 224,
+                    padding: 16,
+                    outputScale: 2
                 )
 
                 guard let outputImage = result,
@@ -297,11 +335,16 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
     ///
     /// Divides the image into overlapping patches, processes each through
     /// the CoreML model, and reconstructs the full output image.
+    ///
+    /// - Parameter outputScale: The spatial scale factor between model input and
+    ///   output. Use 1 for filters (448 -> 448) and 2 for EDSR super-resolution
+    ///   (224 -> 448).
     private func processTiled(
         image: UIImage,
         model: MLModel,
         patchSize: Int,
-        padding: Int
+        padding: Int,
+        outputScale: Int = 1
     ) throws -> UIImage? {
 
         guard let cgImage = image.cgImage else { return nil }
@@ -313,9 +356,11 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
         let cols = Int(ceil(Double(width) / Double(patchSize)))
         let rows = Int(ceil(Double(height) / Double(patchSize)))
 
-        // Output buffer
-        let outputWidth = cols * patchSize
-        let outputHeight = rows * patchSize
+        // Output buffer accounts for the model's output scale
+        let outPatchSize = patchSize * outputScale
+        let outPadding = padding * outputScale
+        let outputWidth = cols * outPatchSize
+        let outputHeight = rows * outPatchSize
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         let bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
 
@@ -361,21 +406,22 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     continue
                 }
 
-                // Remove padding and place in output
+                // Remove padding and place in output. Padding is scaled on the
+                // output side for super-resolution.
                 let cropRect = CGRect(
-                    x: padding, y: padding,
-                    width: patchSize, height: patchSize
+                    x: outPadding, y: outPadding,
+                    width: outPatchSize, height: outPatchSize
                 )
 
                 guard let croppedCGImage = filteredPatch.cgImage?.cropping(to: cropRect) else {
                     continue
                 }
 
-                let destX = col * patchSize
-                let destY = row * patchSize
+                let destX = col * outPatchSize
+                let destY = row * outPatchSize
                 let destRect = CGRect(
                     x: destX, y: destY,
-                    width: patchSize, height: patchSize
+                    width: outPatchSize, height: outPatchSize
                 )
 
                 // Draw into output context
@@ -386,10 +432,10 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
             }
         }
 
-        // Crop to original image size
+        // Crop to final output size (original image size multiplied by outputScale)
         guard let fullOutput = context.makeImage() else { return nil }
         guard let finalImage = fullOutput.cropping(to: CGRect(
-            x: 0, y: 0, width: width, height: height
+            x: 0, y: 0, width: width * outputScale, height: height * outputScale
         )) else { return nil }
 
         return UIImage(cgImage: finalImage)
