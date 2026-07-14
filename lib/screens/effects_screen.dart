@@ -1,3 +1,4 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -32,6 +33,10 @@ class _EffectsScreenState extends State<EffectsScreen> {
   Uint8List? _baseFilteredImage;  // Filter result without grain/leak (avoids re-running CoreML)
   Uint8List? _filteredImage;      // Final result with grain/leak applied (for display)
   Uint8List? _filterSource;       // The originalPhoto this filter was computed from
+
+  // Debounce timer for post-effect slider changes
+  Timer? _postEffectTimer;
+  bool _isProcessingPostEffects = false;
 
   // Film presets
   String _selectedPreset = 'CLASSIC CHROME';
@@ -393,34 +398,56 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   /// Apply grain and light leak post-processing on top of [_baseFilteredImage].
   ///
-  /// This is fast (Dart-only pixel ops) and does NOT re-run CoreML,
-  /// so adjusting grain/leak sliders is responsive.
+  /// Runs in a separate isolate to avoid UI jank.
+  /// Debounced: rapid slider changes are coalesced; only the latest value
+  /// is processed after a 150ms quiet period.
   void _applyPostEffects() {
+    _postEffectTimer?.cancel();
+    _postEffectTimer = Timer(const Duration(milliseconds: 150), () {
+      _applyPostEffectsNow();
+    });
+  }
+
+  void _applyPostEffectsNow() async {
     final base = _baseFilteredImage;
-    if (base == null) return;
+    if (base == null || _isProcessingPostEffects) return;
 
     final imageService = context.read<ImageService>();
 
     final grainI = _grainEnabled ? _grainIntensity : 0.0;
     final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
-    // Light leak intensity is proportional to range so brighter leaks reach further
-    final leakI = leakRange > 0 ? (30.0 + leakRange * 0.7) : 0.0;
+    // Light leak intensity scales with range: brighter and wider together
+    final leakI = leakRange > 0 ? (40.0 + leakRange * 0.6) : 0.0;
 
-    // Run post-processing asynchronously to avoid jank on the UI thread.
-    Future(() {
-      return FilterProcessor.applyPostEffects(
+    setState(() => _isProcessingPostEffects = true);
+
+    try {
+      // Run heavy pixel processing in a separate isolate
+      final result = await Isolate.run(() => FilterProcessor.applyPostEffects(
         base,
         grainIntensity: grainI,
         lightLeakIntensity: leakI,
         lightLeakRange: leakRange,
         lightLeakStyle: _lightLeakStyle,
         imageName: imageService.currentPhotoName,
-      );
-    }).then((result) {
+      ));
+
       if (!mounted) return;
       imageService.updateCurrentPhoto(result); // share with BORDERS
-      setState(() => _filteredImage = result);
-    });
+      setState(() {
+        _filteredImage = result;
+        _isProcessingPostEffects = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isProcessingPostEffects = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _postEffectTimer?.cancel();
+    super.dispose();
   }
 }
 

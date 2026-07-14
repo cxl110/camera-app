@@ -400,7 +400,7 @@ class FilterProcessor {
   /// highlights — matching real film behavior.
   static void _addGrainToImage(
       img.Image image, double intensityPercent, int seed) {
-    final sigma = intensityPercent / 100.0 * 28.0;
+    final sigma = intensityPercent / 100.0 * 80.0; // max sigma 80 — very visible grain
     if (sigma <= 0) return;
 
     final rand = Random(seed);
@@ -452,7 +452,7 @@ class FilterProcessor {
     final width = image.width;
     final height = image.height;
     final maxSide = max(width, height).toDouble();
-    final reach = maxSide * (0.15 + rangePercent / 100.0 * 0.65);
+    final reach = maxSide * (0.2 + rangePercent / 100.0 * 0.8);
 
     // Create a transparent RGBA mask
     var mask = img.Image(width: width, height: height, numChannels: 4);
@@ -473,23 +473,31 @@ class FilterProcessor {
     final intensity = intensityPercent / 100.0;
 
     // Screen blend the leak mask onto the image.
-    // Screen: out = 255 - (255 - base) * (255 - leak) / 255
+    // We use the mask color values directly and blend with intensity.
+    // Screen: out = base + leak * (1 - base/255)
+    // This brightens the image where the leak is present.
     for (final p in image) {
       final leak = mask.getPixel(p.x, p.y);
-      final lr = leak.r.toDouble() * intensity;
-      final lg = leak.g.toDouble() * intensity;
-      final lb = leak.b.toDouble() * intensity;
+      // Skip pixels with negligible leak
+      final la = leak.a.toDouble();
+      if (la < 1.0) continue;
 
-      if (lr <= 0 && lg <= 0 && lb <= 0) continue;
+      final blend = intensity * (la / 255.0);
+      if (blend < 0.001) continue;
+
+      final lr = leak.r.toDouble() * blend;
+      final lg = leak.g.toDouble() * blend;
+      final lb = leak.b.toDouble() * blend;
 
       final r = p.r.toDouble();
       final g = p.g.toDouble();
       final b = p.b.toDouble();
 
+      // Screen blend: out = base + leak * (1 - base/255)
       p.setRgba(
-        (255.0 - (255.0 - r) * (255.0 - lr) / 255.0).clamp(0, 255).toInt(),
-        (255.0 - (255.0 - g) * (255.0 - lg) / 255.0).clamp(0, 255).toInt(),
-        (255.0 - (255.0 - b) * (255.0 - lb) / 255.0).clamp(0, 255).toInt(),
+        (r + lr * (1.0 - r / 255.0)).clamp(0, 255).toInt(),
+        (g + lg * (1.0 - g / 255.0)).clamp(0, 255).toInt(),
+        (b + lb * (1.0 - b / 255.0)).clamp(0, 255).toInt(),
         p.a.toInt(),
       );
     }
@@ -555,18 +563,18 @@ class FilterProcessor {
     }
   }
 
-  /// Pick a leak color based on style.
+  /// Pick a leak color based on style. Colors are full-brightness for vivid leaks.
   static img.Color _leakColor(String style, Random rand) {
     switch (style) {
       case 'COOL':
-        return img.ColorRgb8(80, 180, 255);
+        return img.ColorRgb8(120, 200, 255);
       case 'RED':
-        return img.ColorRgb8(255, 60, 80);
+        return img.ColorRgb8(255, 80, 100);
       case 'WARM':
       default:
         return rand.nextBool()
-            ? img.ColorRgb8(255, 140, 50)
-            : img.ColorRgb8(255, 210, 90);
+            ? img.ColorRgb8(255, 160, 60)
+            : img.ColorRgb8(255, 220, 100);
     }
   }
 }
