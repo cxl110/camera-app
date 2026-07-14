@@ -96,7 +96,11 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/ios/iphoneos/Runner.app Payload/
-          zip -r CameraApp.ipa Payload/
+          # Use store mode (-0) for binaries to prevent corruption
+          # Compress only non-binary resources, store .app structure uncompressed
+          cd Payload
+          zip -0 -r ../CameraApp.ipa .
+          cd ..
           rm -rf Payload
 
       - name: Upload IPA
