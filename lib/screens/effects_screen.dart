@@ -54,15 +54,17 @@ class _EffectsScreenState extends State<EffectsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final current = context.read<ImageService>().currentPhoto;
-    // If the shared photo changed underneath us (e.g. new load or border saved),
-    // drop the stale filtered preview and re-apply the current preset.
-    if (current != null &&
-        !identical(current, _filterSource) &&
-        !identical(current, _filteredImage)) {
+    final imageService = context.read<ImageService>();
+    final original = imageService.originalPhoto;
+    // Only re-apply filter when the ORIGINAL photo changes (e.g. new load from album).
+    // Do NOT react to currentPhoto changes — updateCurrentPhoto() in _applyPostEffectsNow
+    // changes currentPhoto on every effect toggle, which would reset _filteredImage
+    // and create an infinite feedback loop, wiping out all effects.
+    if (original != null && !identical(original, _filterSource)) {
       setState(() {
         _filteredImage = null;
-        _filterSource = current;
+        _baseFilteredImage = null;
+        _filterSource = original;
       });
       _applyFilter(_selectedPreset);
     }
@@ -434,11 +436,13 @@ class _EffectsScreenState extends State<EffectsScreen> {
       ));
 
       if (!mounted) return;
-      imageService.updateCurrentPhoto(result); // share with BORDERS
+      // Set _filteredImage first so the preview updates immediately.
+      // Then share with BORDERS via updateCurrentPhoto.
       setState(() {
         _filteredImage = result;
         _isProcessingPostEffects = false;
       });
+      imageService.updateCurrentPhoto(result); // share with BORDERS
     } catch (e) {
       if (!mounted) return;
       setState(() => _isProcessingPostEffects = false);
