@@ -80,12 +80,30 @@ jobs:
         run: python scripts/add_coreml_to_xcode.py
 
       - name: Build iOS (no codesign)
-        run: flutter build ios --release --no-codesign
+        run: |
+          # Build with Xcode directly to avoid Flutter's codesign check
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ../build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | tail -5
+          cd ..
 
       - name: Package as IPA
         run: |
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          APP_PATH=$(find build/ios/Build/Products/Release-iphoneos -name "Runner.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found in build output"
+            find build/ios -name "*.app" -type d 2>/dev/null
+            exit 1
+          fi
+          cp -r "$APP_PATH" Payload/
           zip -r CameraApp.ipa Payload/
           rm -rf Payload
 
