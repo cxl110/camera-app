@@ -12,6 +12,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Auto bump build number
+        run: |
+          # Read current version from pubspec.yaml (e.g. "1.0.1+6")
+          CURRENT=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+          VERSION=$(echo "$CURRENT" | cut -d+ -f1)   # "1.0.1"
+          BUILD=$(echo "$CURRENT" | cut -d+ -f2)     # "6"
+          # Increment build number
+          NEW_BUILD=$((BUILD + 1))
+          NEW_VERSION="${VERSION}+${NEW_BUILD}"
+          # Use GitHub run_number as a fallback to guarantee uniqueness
+          # Format: major.minor.patch+run_number
+          UNIQUE_BUILD=$((GITHUB_RUN_NUMBER))
+          NEW_VERSION="${VERSION}+${UNIQUE_BUILD}"
+          sed -i '' "s/^version: .*/version: ${NEW_VERSION}/" pubspec.yaml
+          echo "Version bumped: ${CURRENT} → ${NEW_VERSION}"
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
