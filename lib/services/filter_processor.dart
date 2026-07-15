@@ -428,11 +428,11 @@ class FilterProcessor {
     return sqrt(-2.0 * log(u1)) * cos(2.0 * pi * u2);
   }
 
-  /// Add a light leak overlay starting from a random image edge.
+  /// Add a realistic light leak overlay.
   ///
-  /// Creates a soft radial gradient on a mask, blurs it, then screen-blends
-  /// the result onto the image. For DOUBLE style, two leaks from opposite
-  /// edges are drawn.
+  /// Simulates film light leaks with multiple overlapping soft blobs,
+  /// warm color gradients, and organic shapes. Uses screen blend mode
+  /// for natural-looking light accumulation.
   static void _addLightLeakToImage(
     img.Image image,
     String style,
@@ -444,33 +444,45 @@ class FilterProcessor {
     final width = image.width;
     final height = image.height;
     final maxSide = max(width, height).toDouble();
-    final reach = maxSide * (0.2 + rangePercent / 100.0 * 0.8);
 
-    // Create a transparent RGBA mask
+    // Range controls how far the leak reaches into the image (0-100%)
+    final reach = maxSide * (0.15 + rangePercent / 100.0 * 0.65);
+    final intensity = intensityPercent / 100.0;
+
+    // Create mask with multiple soft blobs for organic look
     var mask = img.Image(width: width, height: height, numChannels: 4);
     img.fill(mask, color: img.ColorRgba8(0, 0, 0, 0));
 
-    if (style == 'DOUBLE') {
-      _drawRadialLeak(mask, width, height, rand, reach, _leakColor('WARM', rand));
-      _drawRadialLeak(mask, width, height, rand, reach, _leakColor('COOL', rand));
-    } else {
-      _drawRadialLeak(
-          mask, width, height, rand, reach, _leakColor(style, rand));
+    // Draw 3-6 overlapping blobs from the same edge region
+    final numBlobs = 3 + rand.nextInt(4);
+    final edge = rand.nextInt(4); // All blobs start from same edge
+
+    for (var i = 0; i < numBlobs; i++) {
+      // Each blob has slightly different position and size
+      final blobReach = reach * (0.5 + rand.nextDouble() * 0.8);
+      final color = _leakColorV2(style, rand, i);
+      _drawSoftBlob(mask, width, height, rand, edge, blobReach, color);
     }
 
-    // Soften the leak edges
-    final blurRadius = (reach * 0.18).clamp(15.0, 70.0).toInt();
+    if (style == 'DOUBLE') {
+      // Second leak from opposite edge with different color
+      final oppositeEdge = (edge + 2) % 4;
+      for (var i = 0; i < 2 + rand.nextInt(2); i++) {
+        final blobReach = reach * (0.4 + rand.nextDouble() * 0.6);
+        final color = _leakColorV2('COOL', rand, i + 10);
+        _drawSoftBlob(mask, width, height, rand, oppositeEdge, blobReach, color);
+      }
+    }
+
+    // Heavy gaussian blur for soft, organic edges
+    final blurRadius = (reach * 0.25).clamp(20.0, 80.0).toInt();
     mask = img.gaussianBlur(mask, radius: blurRadius);
+    // Second pass for extra softness
+    mask = img.gaussianBlur(mask, radius: (blurRadius * 0.5).toInt());
 
-    final intensity = intensityPercent / 100.0;
-
-    // Screen blend the leak mask onto the image.
-    // We use the mask color values directly and blend with intensity.
-    // Screen: out = base + leak * (1 - base/255)
-    // This brightens the image where the leak is present.
+    // Screen blend onto image
     for (final p in image) {
       final leak = mask.getPixel(p.x, p.y);
-      // Skip pixels with negligible leak
       final la = leak.a.toDouble();
       if (la < 1.0) continue;
 
@@ -485,7 +497,7 @@ class FilterProcessor {
       final g = p.g.toDouble();
       final b = p.b.toDouble();
 
-      // Screen blend: out = base + leak * (1 - base/255)
+      // Screen blend: brightens naturally
       p.setRgba(
         (r + lr * (1.0 - r / 255.0)).clamp(0, 255).toInt(),
         (g + lg * (1.0 - g / 255.0)).clamp(0, 255).toInt(),
@@ -495,40 +507,40 @@ class FilterProcessor {
     }
   }
 
-  /// Draw a radial gradient leak on [mask] centered on a random edge point.
-  static void _drawRadialLeak(
+  /// Draw a single soft blob on the mask from a random point on the given edge.
+  static void _drawSoftBlob(
     img.Image mask,
     int width,
     int height,
     Random rand,
+    int edge,
     double reach,
     img.Color color,
   ) {
-    // Pick a random point on one of the four edges
-    final side = rand.nextInt(4);
+    // Random position along the chosen edge, slightly outside the image
     double cx, cy;
-    switch (side) {
+    switch (edge) {
       case 0: // top
         cx = rand.nextDouble() * width;
-        cy = 0.0;
+        cy = -reach * 0.2 * rand.nextDouble();
         break;
       case 1: // right
-        cx = width.toDouble();
+        cx = width + reach * 0.2 * rand.nextDouble();
         cy = rand.nextDouble() * height;
         break;
       case 2: // bottom
         cx = rand.nextDouble() * width;
-        cy = height.toDouble();
+        cy = height + reach * 0.2 * rand.nextDouble();
         break;
       default: // left
-        cx = 0.0;
+        cx = -reach * 0.2 * rand.nextDouble();
         cy = rand.nextDouble() * height;
         break;
     }
 
-    final cr = color.r.toInt();
-    final cg = color.g.toInt();
-    final cb = color.b.toInt();
+    final cr = color.r.toDouble();
+    final cg = color.g.toDouble();
+    final cb = color.b.toDouble();
 
     for (final p in mask) {
       final dx = p.x.toDouble() - cx;
@@ -536,37 +548,55 @@ class FilterProcessor {
       final dist = sqrt(dx * dx + dy * dy);
       if (dist >= reach) continue;
 
+      // Smooth exponential falloff (more realistic than quadratic)
       final t = 1.0 - (dist / reach);
-      final alpha = (t * t * 255.0).clamp(0, 255).toInt();
+      final alpha = (t * t * t * 255.0).clamp(0, 255).toInt();
 
-      // Accumulate onto mask (needed for DOUBLE style)
+      // Accumulate color onto mask
       final existing = mask.getPixel(p.x, p.y);
-      final er = existing.r.toInt();
-      final eg = existing.g.toInt();
-      final eb = existing.b.toInt();
-      final ea = existing.a.toInt();
-
       p.setRgba(
-        min(255, er + (cr * alpha) ~/ 255),
-        min(255, eg + (cg * alpha) ~/ 255),
-        min(255, eb + (cb * alpha) ~/ 255),
-        min(255, ea + alpha),
+        min(255, existing.r.toInt() + (cr * alpha / 255.0).toInt()),
+        min(255, existing.g.toInt() + (cg * alpha / 255.0).toInt()),
+        min(255, existing.b.toInt() + (cb * alpha / 255.0).toInt()),
+        min(255, existing.a.toInt() + alpha),
       );
     }
   }
 
-  /// Pick a leak color based on style. Colors are full-brightness for vivid leaks.
-  static img.Color _leakColor(String style, Random rand) {
+  /// Pick a realistic light leak color with variation.
+  ///
+  /// Real film leaks are warm (orange/red/yellow) from light entering
+  /// the camera body. Cool leaks simulate light through blue-tinted glass.
+  static img.Color _leakColorV2(String style, Random rand, int index) {
     switch (style) {
       case 'COOL':
-        return img.ColorRgb8(120, 200, 255);
+        // Cool blue-white light
+        return img.ColorRgb8(
+          140 + rand.nextInt(40),
+          190 + rand.nextInt(40),
+          255,
+        );
       case 'RED':
-        return img.ColorRgb8(255, 80, 100);
+        // Deep red/orange
+        return img.ColorRgb8(
+          255,
+          60 + rand.nextInt(60),
+          40 + rand.nextInt(60),
+        );
       case 'WARM':
       default:
-        return rand.nextBool()
-            ? img.ColorRgb8(255, 160, 60)
-            : img.ColorRgb8(255, 220, 100);
+        // Warm orange-yellow with variation
+        final variant = index % 3;
+        if (variant == 0) {
+          // Orange
+          return img.ColorRgb8(255, 140 + rand.nextInt(40), 30 + rand.nextInt(30));
+        } else if (variant == 1) {
+          // Golden yellow
+          return img.ColorRgb8(255, 200 + rand.nextInt(30), 60 + rand.nextInt(40));
+        } else {
+          // Reddish orange
+          return img.ColorRgb8(255, 100 + rand.nextInt(40), 50 + rand.nextInt(30));
+        }
     }
   }
 }
