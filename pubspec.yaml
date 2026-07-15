@@ -62,6 +62,7 @@ flutter:
   assets:
     - assets/models/
     - assets/frames/
+    - assets/film_presets/
 
 flutter_launcher_icons:
   ios: true

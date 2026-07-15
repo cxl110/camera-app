@@ -18,18 +18,18 @@ class FilmPresets extends StatelessWidget {
   // Film presets with placeholder colors for representative images
   static const _presets = [
     _PresetData('NONE', Color(0xFF3A3A3A)),
-    _PresetData('ACROS', Color(0xFF2D2D2D)),
+    _PresetData('ACROS', Color(0xFF2D2D2D), 'assets/film_presets/acros.png'),
     _PresetData('CLASSIC CHROME', Color(0xFF4A6B8A)),
-    _PresetData('ETERNA', Color(0xFF6B5B4F)),
+    _PresetData('ETERNA', Color(0xFF6B5B4F), 'assets/film_presets/eterna.png'),
     _PresetData('CLASSIC Neg.', Color(0xFF5A7A5A)),
     _PresetData('PRO Neg.Hi', Color(0xFF8B7D6B)),
-    _PresetData('VELVIA', Color(0xFF4A8B3A)),
-    _PresetData('ASTIA', Color(0xFFC4956A)),
-    _PresetData('PROVIA', Color(0xFF6A8BAF)),
-    _PresetData('Pro 400H', Color(0xFF7BA4B8)),
-    _PresetData('Portra 400', Color(0xFFC4956B)),
-    _PresetData('Gold 200', Color(0xFFD4A44A)),
-    _PresetData('UltraMax 400', Color(0xFFC4783C)),
+    _PresetData('VELVIA', Color(0xFF4A8B3A), 'assets/film_presets/velvia.png'),
+    _PresetData('ASTIA', Color(0xFFC4956A), 'assets/film_presets/astia.png'),
+    _PresetData('PROVIA', Color(0xFF6A8BAF), 'assets/film_presets/provia_100f.png'),
+    _PresetData('Pro 400H', Color(0xFF7BA4B8), 'assets/film_presets/pro_400h.png'),
+    _PresetData('Portra 400', Color(0xFFC4956B), 'assets/film_presets/portra_400.png'),
+    _PresetData('Gold 200', Color(0xFFD4A44A), 'assets/film_presets/gold_200.png'),
+    _PresetData('UltraMax 400', Color(0xFFC4783C), 'assets/film_presets/ultramax_400.png'),
   ];
 
   @override
@@ -76,8 +76,10 @@ class FilmPresets extends StatelessWidget {
 
 class _PresetData {
   final String name;
-  final Color sampleColor; // Placeholder for filter sample image
-  const _PresetData(this.name, this.sampleColor);
+  final Color sampleColor;
+  final String? thumbnailAsset;
+
+  const _PresetData(this.name, this.sampleColor, [this.thumbnailAsset]);
 }
 
 class _PresetCard extends StatelessWidget {
@@ -107,20 +109,21 @@ class _PresetCard extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // Preview image placeholder
+            // Preview image
             Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: preset.sampleColor.withValues(alpha: 0.6),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.filter_vintage,
-                    size: 18,
-                    color: Colors.white.withValues(alpha: 0.3),
-                  ),
-                ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                child: preset.thumbnailAsset == null
+                    ? _buildPlaceholder()
+                    : Image.asset(
+                        preset.thumbnailAsset!,
+                        width: double.infinity,
+                        height: double.infinity,
+                        fit: BoxFit.cover,
+                        cacheWidth: 384,
+                        filterQuality: FilterQuality.medium,
+                        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+                      ),
               ),
             ),
             // Filter name
@@ -147,6 +150,21 @@ class _PresetCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: preset.sampleColor.withValues(alpha: 0.6),
+      child: Center(
+        child: Icon(
+          Icons.filter_vintage,
+          size: 18,
+          color: Colors.white.withValues(alpha: 0.3),
         ),
       ),
     );
