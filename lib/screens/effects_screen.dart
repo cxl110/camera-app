@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
@@ -31,13 +32,21 @@ class EffectsScreen extends StatefulWidget {
 
 class _EffectsScreenState extends State<EffectsScreen> {
   bool _showBefore = false;
-  Uint8List? _baseFilteredImage;  // Filter result without grain/leak (avoids re-running CoreML)
-  Uint8List? _filteredImage;      // Final result with grain/leak applied (for display)
-  Uint8List? _filterSource;       // The originalPhoto this filter was computed from
+
+  /// The photo bytes that the current filter was computed from.
+  /// Used to detect when a NEW photo is loaded (not a post-effect update).
+  Uint8List? _originalSource;
+
+  /// The filtered image displayed in the preview (includes grain/leak).
+  Uint8List? _displayImage;
+
+  /// The pure filter result (no grain/leak). Cached so we don't re-run CoreML
+  /// when only grain/leak settings change.
+  Uint8List? _baseFilteredImage;
 
   // Debounce timer for post-effect slider changes
   Timer? _postEffectTimer;
-  bool _isProcessingPostEffects = false;
+  bool _isProcessing = false;
 
   // Film presets
   String _selectedPreset = 'CLASSIC CHROME';
@@ -52,27 +61,39 @@ class _EffectsScreenState extends State<EffectsScreen> {
   String _lightLeakStyle = 'NONE';
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
+  void initState() {
+    super.initState();
+    // Schedule initial filter application after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initFilter();
+    });
+  }
+
+  /// Initialize: apply default filter to the loaded photo.
+  void _initFilter() {
     final imageService = context.read<ImageService>();
-    final original = imageService.originalPhoto;
-    // Only re-apply filter when the ORIGINAL photo changes (e.g. new load from album).
-    // Do NOT react to currentPhoto changes — updateCurrentPhoto() in _applyPostEffectsNow
-    // changes currentPhoto on every effect toggle, which would reset _filteredImage
-    // and create an infinite feedback loop, wiping out all effects.
-    if (original != null && !identical(original, _filterSource)) {
-      setState(() {
-        _filteredImage = null;
-        _baseFilteredImage = null;
-        _filterSource = original;
-      });
-      _applyFilter(_selectedPreset);
-    }
+    final original = imageService.originalPhoto ?? imageService.currentPhoto;
+    if (original == null) return;
+    _originalSource = original;
+    _applyFilter(_selectedPreset);
   }
 
   @override
   Widget build(BuildContext context) {
     final imageService = context.watch<ImageService>();
+
+    // Detect when a NEW photo is loaded (different from our source).
+    // Only reset when originalPhoto actually changes identity.
+    final newOriginal = imageService.originalPhoto;
+    if (newOriginal != null && !identical(newOriginal, _originalSource)) {
+      _originalSource = newOriginal;
+      _displayImage = null;
+      _baseFilteredImage = null;
+      // Apply filter in next frame to avoid calling setState during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyFilter(_selectedPreset);
+      });
+    }
 
     // Block access when WiFi is disconnected
     if (!widget.wifiConnected) {
@@ -105,6 +126,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
       );
     }
 
+    // Choose which image to display
+    final displayBytes = _getDisplayBytes(imageService);
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       body: SafeArea(
@@ -113,8 +137,8 @@ class _EffectsScreenState extends State<EffectsScreen> {
             // ── Top Bar ──
             _buildTopBar(imageService),
 
-            // ── Image Preview Area (~1/3) ──
-            _buildPreviewArea(imageService),
+            // ── Image Preview Area ──
+            _buildPreviewArea(imageService, displayBytes),
 
             // ── Scrollable Content ──
             Expanded(
@@ -182,6 +206,20 @@ class _EffectsScreenState extends State<EffectsScreen> {
     );
   }
 
+  /// Choose which image bytes to show in the preview.
+  Uint8List? _getDisplayBytes(ImageService imageService) {
+    if (_showBefore) {
+      // BEFORE: show original unfiltered photo
+      return imageService.originalPhoto ?? imageService.currentPhoto;
+    }
+    if (_displayImage != null) {
+      // AFTER with effects applied
+      return _displayImage;
+    }
+    // No filter applied yet, show original
+    return imageService.originalPhoto ?? imageService.currentPhoto;
+  }
+
   Widget _buildTopBar(ImageService imageService) {
     return Container(
       height: 44,
@@ -191,23 +229,17 @@ class _EffectsScreenState extends State<EffectsScreen> {
       ),
       child: Row(
         children: [
-          // Back button
           IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 22),
             onPressed: () => Navigator.pop(context),
             tooltip: '返回',
           ),
-
           const Spacer(),
-
-          // Save button
           IconButton(
             icon: Icon(Icons.save_alt, color: Colors.white.withValues(alpha: 0.7), size: 22),
             onPressed: imageService.currentPhoto != null ? _onSaveFiltered : null,
             tooltip: '保存',
           ),
-
-          // Album button
           IconButton(
             icon: Icon(Icons.folder_outlined, color: Colors.white.withValues(alpha: 0.7), size: 22),
             onPressed: _onOpenAlbum,
@@ -218,7 +250,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
     );
   }
 
-  Widget _buildPreviewArea(ImageService imageService) {
+  Widget _buildPreviewArea(ImageService imageService, Uint8List? displayBytes) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -228,15 +260,13 @@ class _EffectsScreenState extends State<EffectsScreen> {
       ),
       child: Stack(
         children: [
-          // Preview image (show filtered by default, original when BEFORE)
-          if (imageService.currentPhoto != null)
+          if (displayBytes != null)
             Positioned.fill(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(7),
                 child: Image.memory(
-                  (_showBefore || _filteredImage == null)
-                      ? (imageService.originalPhoto ?? imageService.currentPhoto!)
-                      : _filteredImage!,
+                  displayBytes,
+                  key: ValueKey(displayBytes.length), // force rebuild when content changes
                   fit: BoxFit.contain,
                 ),
               ),
@@ -251,26 +281,27 @@ class _EffectsScreenState extends State<EffectsScreen> {
             ),
 
           // ── Top-left: Filter name ──
-          Positioned(
-            top: 10,
-            left: 10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                _selectedPreset,
-                style: const TextStyle(
-                  color: Color(0xFFD89A0F),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
+          if (_displayImage != null)
+            Positioned(
+              top: 10,
+              left: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  _selectedPreset,
+                  style: const TextStyle(
+                    color: Color(0xFFD89A0F),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
             ),
-          ),
 
           // ── Top-right: BEFORE / AFTER toggle ──
           Positioned(
@@ -292,7 +323,6 @@ class _EffectsScreenState extends State<EffectsScreen> {
               ],
             ),
           ),
-
         ],
       ),
     );
@@ -309,11 +339,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
         final firstPhoto = result.photos.first;
         if (firstPhoto.fullImage != null) {
           imageService.loadPhoto(firstPhoto.fullImage!, name: firstPhoto.name);
-          setState(() {
-            _filteredImage = null;
-            _baseFilteredImage = null;
-            _filterSource = null;
-          });
+          // _originalSource will be detected in build() → triggers _applyFilter
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -335,7 +361,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _onSaveFiltered() async {
     final imageService = context.read<ImageService>();
-    final output = _filteredImage ?? imageService.currentPhoto;
+    final output = _displayImage ?? imageService.currentPhoto;
     if (output == null) return;
     try {
       final neuralClient = NeuralFilterClient();
@@ -362,6 +388,10 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _onTabChanged(String tab) {
     if (tab == 'BORDERS') {
+      // Share the filtered result with BORDERS before navigating
+      if (_displayImage != null) {
+        context.read<ImageService>().updateCurrentPhoto(_displayImage!);
+      }
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -376,34 +406,35 @@ class _EffectsScreenState extends State<EffectsScreen> {
     }
   }
 
+  /// Apply a named filter preset to the original photo.
   void _applyFilter(String preset) {
-    final imageService = context.read<ImageService>();
-    // Always apply filter from the ORIGINAL photo, not the already-filtered one.
-    // This prevents stacking filters on top of each other when switching presets.
-    final source = imageService.originalPhoto ?? imageService.currentPhoto;
-    if (source == null) return;
+    // Always use original photo as source (never a previously filtered result)
+    final source = _originalSource;
+    if (source == null) {
+      debugPrint('[Effects] _applyFilter: no original source');
+      return;
+    }
 
-    // Immediately highlight selected preset
     setState(() {
       _selectedPreset = preset;
-      _showBefore = false; // show current filtered result while loading
-      _filterSource = source;
+      _showBefore = false;
     });
+
+    debugPrint('[Effects] applying filter: $preset on ${source.length} bytes');
 
     // Process neural inference in background
     FilterProcessor.apply(source, preset).then((filtered) {
       if (!mounted) return;
+      debugPrint('[Effects] filter result: ${filtered.length} bytes');
       _baseFilteredImage = filtered;
-      // Now apply grain/leak on top
+      // Apply grain/leak on top
       _applyPostEffects();
+    }).catchError((e) {
+      debugPrint('[Effects] filter error: $e');
     });
   }
 
   /// Apply grain and light leak post-processing on top of [_baseFilteredImage].
-  ///
-  /// Runs in a separate isolate to avoid UI jank.
-  /// Debounced: rapid slider changes are coalesced; only the latest value
-  /// is processed after a 150ms quiet period.
   void _applyPostEffects() {
     _postEffectTimer?.cancel();
     _postEffectTimer = Timer(const Duration(milliseconds: 150), () {
@@ -413,39 +444,46 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _applyPostEffectsNow() async {
     final base = _baseFilteredImage;
-    if (base == null || _isProcessingPostEffects) return;
-
-    final imageService = context.read<ImageService>();
+    if (base == null || _isProcessing) return;
 
     final grainI = _grainEnabled ? _grainIntensity : 0.0;
     final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
-    // Light leak intensity scales with range: brighter and wider together
     final leakI = leakRange > 0 ? (40.0 + leakRange * 0.6) : 0.0;
 
-    setState(() => _isProcessingPostEffects = true);
+    setState(() => _isProcessing = true);
 
     try {
-      // Run heavy pixel processing in a separate isolate
+      // Run pixel processing in a separate isolate
       final result = await Isolate.run(() => FilterProcessor.applyPostEffects(
         base,
         grainIntensity: grainI,
         lightLeakIntensity: leakI,
         lightLeakRange: leakRange,
         lightLeakStyle: _lightLeakStyle,
-        imageName: imageService.currentPhotoName,
+        imageName: null, // don't depend on ImageService here
       ));
 
       if (!mounted) return;
-      // Set _filteredImage first so the preview updates immediately.
-      // Then share with BORDERS via updateCurrentPhoto.
+
+      debugPrint('[Effects] post-effects result: ${result.length} bytes, '
+          'grain=$_grainEnabled(${grainI.round()}%), '
+          'leak=$_lightLeakEnabled($_lightLeakStyle ${leakRange.round()}%)');
+
       setState(() {
-        _filteredImage = result;
-        _isProcessingPostEffects = false;
+        _displayImage = result;
+        _isProcessing = false;
       });
-      imageService.updateCurrentPhoto(result); // share with BORDERS
+
+      // Also share with BORDERS (outside setState to avoid triggering another rebuild)
+      context.read<ImageService>().updateCurrentPhoto(result);
     } catch (e) {
+      debugPrint('[Effects] post-effects error: $e');
       if (!mounted) return;
-      setState(() => _isProcessingPostEffects = false);
+      // Fall back: show base filter without effects
+      setState(() {
+        _displayImage = base;
+        _isProcessing = false;
+      });
     }
   }
 
