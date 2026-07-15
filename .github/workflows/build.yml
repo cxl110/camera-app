@@ -92,6 +92,20 @@ jobs:
           " "$PBX"
           flutter build ios --release --no-codesign
 
+      - name: Copy compiled CoreML models into Runner.app
+        run: |
+          # Flutter asset system only includes files, not directories.
+          # .mlmodelc bundles are directories → they're NOT in the Flutter bundle.
+          # Copy them into Runner.app/Resources so Bundle.main can find them.
+          APP_DIR="build/ios/iphoneos/Runner.app"
+          for modelc in assets/models/*.mlmodelc; do
+            [ -d "$modelc" ] && cp -r "$modelc" "$APP_DIR/"
+          done
+          echo "=== Models in Runner.app ==="
+          ls -d "$APP_DIR"/*.mlmodelc/ 2>/dev/null | wc -l
+          echo "=== .mlmodel files in Flutter assets ==="
+          find "$APP_DIR" -name "*.mlmodel" | wc -l
+
       - name: Package as IPA
         run: |
           mkdir -p Payload
