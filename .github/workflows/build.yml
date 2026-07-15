@@ -12,19 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Auto bump build number
+      - name: Auto bump version
         run: |
           # Read current version from pubspec.yaml (e.g. "1.0.1+6")
           CURRENT=$(grep '^version:' pubspec.yaml | sed 's/version: //')
-          VERSION=$(echo "$CURRENT" | cut -d+ -f1)   # "1.0.1"
-          BUILD=$(echo "$CURRENT" | cut -d+ -f2)     # "6"
-          # Increment build number
-          NEW_BUILD=$((BUILD + 1))
-          NEW_VERSION="${VERSION}+${NEW_BUILD}"
-          # Use GitHub run_number as a fallback to guarantee uniqueness
-          # Format: major.minor.patch+run_number
-          UNIQUE_BUILD=$((GITHUB_RUN_NUMBER))
-          NEW_VERSION="${VERSION}+${UNIQUE_BUILD}"
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)           # "1"
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)           # "0"
+          PATCH=$(echo "$CURRENT" | cut -d. -f3 | cut -d+ -f1)  # "1"
+          # Increment patch version: 1.0.1 → 1.0.2
+          NEW_PATCH=$((PATCH + 1))
+          # Use GitHub run_number as build number for uniqueness
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}+${GITHUB_RUN_NUMBER}"
           sed -i '' "s/^version: .*/version: ${NEW_VERSION}/" pubspec.yaml
           echo "Version bumped: ${CURRENT} → ${NEW_VERSION}"
 
