@@ -7,10 +7,11 @@ import 'coreml_bridge.dart';
 /// Pre-computed light leak overlay textures.
 ///
 /// Generated once on first use, cached forever. Each overlay is a 800x600 RGBA
-/// image representing a different light leak pattern — large, soft, diffused
-/// warm glows that mimic real film light leaks (like sunlight bleeding into frame).
-/// At runtime, one is randomly selected, scaled to the target image, tinted
-/// per style, and composited via screen blend.
+/// image representing a different layered light leak pattern: broad slanted
+/// bands, hot yellow cores, orange transitions, and red/magenta halos. This
+/// mimics light entering the film gate from an edge rather than a circular
+/// radial glow. At runtime, one is randomly selected, scaled to the target
+/// image, tinted per style, and composited via screen blend.
 class _LeakOverlays {
   static List<img.Image>? _cache;
 
@@ -19,18 +20,133 @@ class _LeakOverlays {
   static List<img.Image> _generate() {
     const w = 800, h = 600;
     return [
-      _rightSunburst(w, h), // Large warm glow from right (matches reference)
-      _leftSunburst(w, h), // Mirror: glow from left
-      _topRightSunburst(w, h), // Glow from top-right corner
-      _bottomRightSunburst(w, h), // Glow from bottom-right
-      _topSunburst(w, h), // Glow from top edge
-      _leftCenterGlow(w, h), // Soft glow left-center
-      _edgeWash(w, h), // Soft wash along right edge
-      _warmHaze(w, h), // Overall warm haze
+      _ribbonPattern(w, h, 0), // Top edge: broad diagonal yellow/red bands
+      _ribbonPattern(w, h, 1), // Bottom-right: large warm diagonal bleed
+      _ribbonPattern(w, h, 2), // Right edge: narrow red/orange flare
+      _ribbonPattern(w, h, 3), // Top-left: magenta/orange diagonal flare
+      _ribbonPattern(w, h, 4), // Top + bottom-right compound leak
+      _ribbonPattern(w, h, 5), // Edge wash with two irregular bands
     ];
   }
 
-  // ── Large soft sunburst patterns ──
+  /// Generate the non-circular, layered ribbon shapes used by film light leaks.
+  ///
+  /// Real light leaks are not a radial gradient: light enters at an edge,
+  /// travels along the film gate, and creates broad slanted bands with a hot
+  /// yellow core, orange transition, and red/magenta halo. Each pattern below
+  /// is made from several independent bands so it remains organic after resize.
+  static img.Image _ribbonPattern(int w, int h, int kind) {
+    final m = img.Image(width: w, height: h, numChannels: 4);
+
+    for (var y = 0; y < h; y++) {
+      final ny = y / h;
+      for (var x = 0; x < w; x++) {
+        final nx = x / w;
+        var gold = 0.0;
+        var orange = 0.0;
+        var red = 0.0;
+        var magenta = 0.0;
+
+        // A gentle deterministic wobble prevents synthetic ruler-straight
+        // edges without introducing visible pixel noise.
+        final wobble = 0.018 * sin(ny * 17.0 + kind * 1.7);
+
+        switch (kind) {
+          case 0: // From top, sweeping diagonally down-right.
+            final depth = ny;
+            final reach = exp(-depth / 0.62);
+            final center = 0.39 + 0.22 * ny + wobble;
+            gold = _band(nx - center, 0.055) * reach;
+            orange = _band(nx - center + 0.015, 0.13) * reach * 0.95;
+            magenta = _band(nx - center - 0.08, 0.23) * reach * 0.72;
+            red = _band(nx - center + 0.11, 0.28) * reach * 0.45;
+            // A second, broken yellow finger at the top edge.
+            gold += _band(nx - (0.67 + wobble), 0.065) * exp(-depth / 0.28) * 0.62;
+            break;
+          case 1: // From bottom-right, sweeping up toward the centre.
+            final depth = 1.0 - ny;
+            final reach = exp(-depth / 0.70);
+            final center = 0.67 + 0.28 * depth + wobble;
+            gold = _band(nx - center, 0.060) * reach;
+            orange = _band(nx - center, 0.145) * reach * 0.95;
+            magenta = _band(nx - center - 0.095, 0.24) * reach * 0.70;
+            red = _band(nx - center + 0.12, 0.27) * reach * 0.52;
+            // Broad exposure pooling along the lower edge.
+            orange += exp(-depth / 0.18) * _band(nx - 0.78, 0.35) * 0.62;
+            gold += exp(-depth / 0.12) * _band(nx - 0.70, 0.18) * 0.46;
+            break;
+          case 2: // Narrow diagonal flare entering from the right edge.
+            final depth = 1.0 - nx;
+            final reach = exp(-depth / 0.55);
+            final center = 0.69 - 0.30 * depth + wobble;
+            gold = _band(ny - center, 0.035) * reach * 0.95;
+            orange = _band(ny - center, 0.085) * reach * 0.90;
+            magenta = _band(ny - center - 0.07, 0.14) * reach * 0.68;
+            red = _band(ny - center + 0.09, 0.17) * reach * 0.62;
+            break;
+          case 3: // From top-left, diagonal magenta/red edge leak.
+            final depth = ny;
+            final reach = exp(-depth / 0.58);
+            final center = 0.16 + 0.34 * ny + wobble;
+            gold = _band(nx - center, 0.060) * reach * 0.88;
+            orange = _band(nx - center, 0.14) * reach * 0.82;
+            magenta = _band(nx - center + 0.08, 0.22) * reach * 0.78;
+            red = _band(nx - center - 0.10, 0.26) * reach * 0.56;
+            break;
+          case 4: // Compound: top band plus lower-right band.
+            final topDepth = ny;
+            final topReach = exp(-topDepth / 0.52);
+            final topCenter = 0.57 + 0.14 * ny + wobble;
+            gold += _band(nx - topCenter, 0.075) * topReach * 0.86;
+            orange += _band(nx - topCenter, 0.17) * topReach * 0.78;
+            red += _band(nx - topCenter - 0.10, 0.26) * topReach * 0.55;
+            final bottomDepth = 1.0 - ny;
+            final bottomReach = exp(-bottomDepth / 0.38);
+            final bottomCenter = 0.74 + 0.19 * bottomDepth + wobble;
+            gold += _band(nx - bottomCenter, 0.055) * bottomReach * 0.82;
+            orange += _band(nx - bottomCenter, 0.14) * bottomReach * 0.75;
+            magenta += _band(nx - bottomCenter - 0.10, 0.23) * bottomReach * 0.58;
+            break;
+          default: // Two edge bands, deliberately asymmetric.
+            final topReach = exp(-ny / 0.40);
+            final topCenter = 0.30 + 0.28 * ny + wobble;
+            gold += _band(nx - topCenter, 0.065) * topReach * 0.70;
+            orange += _band(nx - topCenter, 0.16) * topReach * 0.72;
+            magenta += _band(nx - topCenter - 0.10, 0.24) * topReach * 0.52;
+            final rightDepth = 1.0 - nx;
+            final rightReach = exp(-rightDepth / 0.44);
+            final rightCenter = 0.78 - 0.24 * rightDepth + wobble;
+            gold += _band(ny - rightCenter, 0.045) * rightReach * 0.78;
+            orange += _band(ny - rightCenter, 0.12) * rightReach * 0.74;
+            red += _band(ny - rightCenter + 0.10, 0.20) * rightReach * 0.62;
+        }
+
+        final total = gold + orange + red + magenta;
+        if (total < 0.004) continue;
+
+        // Keep the core bright enough to look like exposure, not a faint tint.
+        final alpha = (total * 1.18).clamp(0.0, 1.0);
+        final weight = max(total, 0.001);
+        final r = ((gold * 255 + orange * 255 + red * 225 + magenta * 155) / weight)
+            .clamp(0, 255).toInt();
+        final g = ((gold * 190 + orange * 105 + red * 35 + magenta * 18) / weight)
+            .clamp(0, 255).toInt();
+        final b = ((gold * 38 + orange * 22 + red * 58 + magenta * 105) / weight)
+            .clamp(0, 255).toInt();
+        final modulation = 0.88 + 0.12 * sin(nx * 23.0 + ny * 11.0 + kind);
+        m.setPixelRgba(x, y, r, g, b,
+            (alpha * modulation * 255).clamp(0, 255).toInt());
+      }
+    }
+    return m;
+  }
+
+  static double _band(double distance, double width) {
+    final normalized = distance / width;
+    return exp(-0.5 * normalized * normalized);
+  }
+
+  // ── Legacy procedural patterns kept for source compatibility ──
 
   /// Large warm glow from the right side — matches the reference image.
   /// Big, diffused, golden-orange wash bleeding in from the right edge.
@@ -625,49 +741,60 @@ class FilterProcessor {
     final rand = Random(seed);
     final width = image.width;
     final height = image.height;
-    final intensity = intensityPercent / 100.0;
+    final intensity = (intensityPercent / 100.0).clamp(0.0, 1.0);
+    final range = (rangePercent / 100.0).clamp(0.0, 1.0);
 
     if (intensity <= 0) return;
 
-    // Select random overlay from cached set
+    // Select a cached ribbon pattern. Each pattern already contains several
+    // independent bands (yellow core, orange body, red/magenta halo).
     final overlays = _LeakOverlays.overlays;
     final overlay = overlays[rand.nextInt(overlays.length)];
 
-    // Scale overlay to target size
+    // Scale overlay to target size.
     final scaled = img.copyResize(overlay,
         width: width, height: height, interpolation: img.Interpolation.linear);
 
-    // Apply color tint based on style
+    // Apply color tint based on style without destroying the magenta/red halo.
     _tintOverlay(scaled, style);
 
-    // Screen blend onto image
+    // Intensity is exposure strength; range controls how far the light is
+    // allowed to bleed away from the entering frame edge. The UI currently
+    // drives both from one slider, but this keeps the API semantically correct.
+    final exposure = (0.45 + intensity * 0.95).clamp(0.0, 1.4);
+    final coverage = 0.20 + range * 0.80;
+
     for (final p in image) {
       final leak = scaled.getPixel(p.x, p.y);
-      final la = leak.a.toDouble();
-      if (la < 1.0) continue;
+      final la = leak.a.toDouble() / 255.0;
+      if (la < 0.002) continue;
 
-      final alpha = intensity * (la / 255.0);
-      if (alpha < 0.001) continue;
+      final nx = p.x / max(width - 1, 1);
+      final ny = p.y / max(height - 1, 1);
+      final edgeDistance = min(min(nx, 1.0 - nx), min(ny, 1.0 - ny));
+      // Softly suppress only the far interior when the range is low; at 100%
+      // the full ribbon remains visible across the frame.
+      final rangeMask = range >= 0.98
+          ? 1.0
+          : (1.0 - ((edgeDistance - coverage * 0.5) / max(coverage * 0.5, 0.001)))
+              .clamp(0.12, 1.0);
+      final alpha = (la * exposure * rangeMask).clamp(0.0, 1.0);
+      if (alpha < 0.002) continue;
 
-      final lr = leak.r.toDouble();
-      final lg = leak.g.toDouble();
-      final lb = leak.b.toDouble();
-
+      // Screen blend with exposure gain. This is deliberately stronger than
+      // a normal translucent tint so the yellow core can clip toward white,
+      // as it does in real overexposed film leaks.
+      final lr = (leak.r.toDouble() / 255.0).clamp(0.0, 1.0);
+      final lg = (leak.g.toDouble() / 255.0).clamp(0.0, 1.0);
+      final lb = (leak.b.toDouble() / 255.0).clamp(0.0, 1.0);
       final r = p.r.toDouble();
       final g = p.g.toDouble();
       final b = p.b.toDouble();
 
-      // Screen blend: natural light accumulation
       p.setRgba(
-        (255.0 - (255.0 - r) * (1.0 - lr * alpha / 255.0))
-            .clamp(0, 255)
-            .toInt(),
-        (255.0 - (255.0 - g) * (1.0 - lg * alpha / 255.0))
-            .clamp(0, 255)
-            .toInt(),
-        (255.0 - (255.0 - b) * (1.0 - lb * alpha / 255.0))
-            .clamp(0, 255)
-            .toInt(),
+        (255.0 - (255.0 - r) * (1.0 - lr * alpha)).clamp(0, 255).toInt(),
+        (255.0 - (255.0 - g) * (1.0 - lg * alpha)).clamp(0, 255).toInt(),
+        (255.0 - (255.0 - b) * (1.0 - lb * alpha)).clamp(0, 255).toInt(),
         p.a.toInt(),
       );
     }
