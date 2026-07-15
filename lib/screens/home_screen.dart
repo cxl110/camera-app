@@ -144,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(
           content: Text('已加载 ${result.photos.length} 张照片'),
           backgroundColor: const Color(0xFF1A1A2E),
+          duration: const Duration(seconds: 1),
         ),
       );
     } catch (e) {

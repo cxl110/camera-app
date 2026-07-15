@@ -24,7 +24,7 @@ class LightLeakControl extends StatelessWidget {
     required this.onStyleChanged,
   });
 
-  static const _styles = ['NONE', 'WARM', 'COOL', 'RED', 'DOUBLE'];
+  static const _styles = ['WARM', 'COOL', 'RED', 'DOUBLE'];
 
   @override
   Widget build(BuildContext context) {

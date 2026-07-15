@@ -48,7 +48,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
   bool _isProcessing = false;
 
   // Film presets
-  String _selectedPreset = 'CLASSIC CHROME';
+  String _selectedPreset = 'NONE';
 
   // Grain
   bool _grainEnabled = false;
@@ -57,7 +57,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
   // Light leak
   bool _lightLeakEnabled = false;
   double _lightLeakIntensity = 30.0;
-  String _lightLeakStyle = 'NONE';
+  String _lightLeakStyle = 'WARM';
 
   @override
   void initState() {
@@ -344,6 +344,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
           SnackBar(
             content: Text('已加载 ${result.photos.length} 张照片'),
             backgroundColor: const Color(0xFF1A1A2E),
+            duration: const Duration(seconds: 1),
           ),
         );
       }
@@ -419,6 +420,13 @@ class _EffectsScreenState extends State<EffectsScreen> {
       _selectedPreset = preset;
       _showBefore = false;
     });
+
+    // NONE = no filter, use original directly
+    if (preset == 'NONE') {
+      _baseFilteredImage = source;
+      _applyPostEffects();
+      return;
+    }
 
     debugPrint('[Effects] applying filter: $preset on ${source.length} bytes');
 

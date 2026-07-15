@@ -17,6 +17,7 @@ class FilmPresets extends StatelessWidget {
 
   // Film presets with placeholder colors for representative images
   static const _presets = [
+    _PresetData('NONE', Color(0xFF3A3A3A)),
     _PresetData('ACROS', Color(0xFF2D2D2D)),
     _PresetData('CLASSIC CHROME', Color(0xFF4A6B8A)),
     _PresetData('ETERNA', Color(0xFF6B5B4F)),
