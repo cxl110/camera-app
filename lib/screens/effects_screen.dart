@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -453,33 +452,27 @@ class _EffectsScreenState extends State<EffectsScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      // Run pixel processing in a separate isolate
-      final result = await Isolate.run(() => FilterProcessor.applyPostEffects(
+      // Run directly (no isolate) to avoid potential serialization issues
+      final result = FilterProcessor.applyPostEffects(
         base,
         grainIntensity: grainI,
         lightLeakIntensity: leakI,
         lightLeakRange: leakRange,
         lightLeakStyle: _lightLeakStyle,
-        imageName: null, // don't depend on ImageService here
-      ));
+      );
 
       if (!mounted) return;
-
-      debugPrint('[Effects] post-effects result: ${result.length} bytes, '
-          'grain=$_grainEnabled(${grainI.round()}%), '
-          'leak=$_lightLeakEnabled($_lightLeakStyle ${leakRange.round()}%)');
 
       setState(() {
         _displayImage = result;
         _isProcessing = false;
       });
 
-      // Also share with BORDERS (outside setState to avoid triggering another rebuild)
+      // Share with BORDERS
       context.read<ImageService>().updateCurrentPhoto(result);
     } catch (e) {
       debugPrint('[Effects] post-effects error: $e');
       if (!mounted) return;
-      // Fall back: show base filter without effects
       setState(() {
         _displayImage = base;
         _isProcessing = false;
