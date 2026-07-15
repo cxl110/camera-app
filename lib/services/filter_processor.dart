@@ -75,7 +75,7 @@ class _LeakOverlays {
         final fadeX = exp(-2.5 * nx * nx);
         final a = (fadeY * fadeX * 255).toInt().clamp(0, 255);
         if (a < 1) continue;
-        m.setPixelRgba(x, y, (255 * fadeY).toInt().clamp(0, 200, 255), (200 * fadeY).toInt().clamp(0, 255), (100 * fadeY).toInt().clamp(0, 255), a);
+        m.setPixelRgba(x, y, (255 * fadeY).toInt().clamp(0, 200), (200 * fadeY).toInt().clamp(0, 255), (100 * fadeY).toInt().clamp(0, 255), a);
       }
     }
     return _blurOverlay(m);
