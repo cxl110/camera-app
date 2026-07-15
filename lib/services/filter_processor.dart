@@ -7,8 +7,10 @@ import 'coreml_bridge.dart';
 /// Pre-computed light leak overlay textures.
 ///
 /// Generated once on first use, cached forever. Each overlay is a 800x600 RGBA
-/// image representing a different light leak pattern. At runtime, one is
-/// randomly selected, scaled to the target image, and composited via screen blend.
+/// image representing a different light leak pattern — large, soft, diffused
+/// warm glows that mimic real film light leaks (like sunlight bleeding into frame).
+/// At runtime, one is randomly selected, scaled to the target image, tinted
+/// per style, and composited via screen blend.
 class _LeakOverlays {
   static List<img.Image>? _cache;
 
@@ -17,164 +19,175 @@ class _LeakOverlays {
   static List<img.Image> _generate() {
     const w = 800, h = 600;
     return [
-      _streakLeft(w, h),
-      _streakRight(w, h),
-      _streakTop(w, h),
-      _streakBottom(w, h),
-      _cornerGlow(w, h),
-      _cornerGlowFlip(w, h),
-      _doubleStreak(w, h),
-      _wideGlow(w, h),
+      _rightSunburst(w, h), // Large warm glow from right (matches reference)
+      _leftSunburst(w, h), // Mirror: glow from left
+      _topRightSunburst(w, h), // Glow from top-right corner
+      _bottomRightSunburst(w, h), // Glow from bottom-right
+      _topSunburst(w, h), // Glow from top edge
+      _leftCenterGlow(w, h), // Soft glow left-center
+      _edgeWash(w, h), // Soft wash along right edge
+      _warmHaze(w, h), // Overall warm haze
     ];
   }
 
-  // ── Pattern 1: Left-edge vertical streak ──
-  static img.Image _streakLeft(int w, int h) {
+  // ── Large soft sunburst patterns ──
+
+  /// Large warm glow from the right side — matches the reference image.
+  /// Big, diffused, golden-orange wash bleeding in from the right edge.
+  static img.Image _rightSunburst(int w, int h) {
     final m = img.Image(width: w, height: h, numChannels: 4);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
-        final nx = x / w; // 0 at left, 1 at right
-        final ny = (y / h - 0.5) * 2.0; // -1..1 centered
-        // Streak fades from left, Gaussian along Y
-        final fadeX = exp(-4.0 * nx);
-        final fadeY = exp(-3.0 * ny * ny);
-        final a = (fadeX * fadeY * 255).toInt().clamp(0, 255);
+        final dx = 1.0 - x / w; // 0 at right edge, 1 at left
+        final vy = (y / h - 0.45) * 2.0; // slightly above center
+        // Main glow: large soft radial from right edge
+        final radialFade = exp(-2.5 * dx);
+        // Vertical spread: wide Gaussian
+        final vertFade = exp(-1.2 * vy * vy);
+        // Secondary softer glow for depth
+        final softGlow = exp(-1.5 * dx) * exp(-0.8 * vy * vy);
+        final fade = (radialFade * vertFade * 0.7 + softGlow * 0.3).clamp(0.0, 1.0);
+        final a = (fade * 255).toInt().clamp(0, 255);
         if (a < 1) continue;
-        // Warm orange color
-        m.setPixelRgba(x, y, 255, (180 * fadeX).toInt().clamp(0, 255), (60 * fadeX).toInt().clamp(0, 255), a);
+        // Warm golden-orange color
+        m.setPixelRgba(x, y, 255, (200 * fade + 80 * (1 - fade)).toInt().clamp(0, 255), (80 * fade).toInt().clamp(0, 255), a);
       }
     }
     return _blurOverlay(m);
   }
 
-  // ── Pattern 2: Right-edge vertical streak ──
-  static img.Image _streakRight(int w, int h) {
-    final m = img.Image(width: w, height: h, numChannels: 4);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        final nx = (w - 1 - x) / w;
-        final ny = (y / h - 0.5) * 2.0;
-        final fadeX = exp(-4.0 * nx);
-        final fadeY = exp(-3.0 * ny * ny);
-        final a = (fadeX * fadeY * 255).toInt().clamp(0, 255);
-        if (a < 1) continue;
-        m.setPixelRgba(x, y, 255, (160 * fadeX).toInt().clamp(0, 255), (80 * fadeX).toInt().clamp(0, 255), a);
-      }
-    }
-    return _blurOverlay(m);
-  }
-
-  // ── Pattern 3: Top-edge horizontal streak ──
-  static img.Image _streakTop(int w, int h) {
-    final m = img.Image(width: w, height: h, numChannels: 4);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        final ny = y / h;
-        final nx = (x / w - 0.5) * 2.0;
-        final fadeY = exp(-5.0 * ny);
-        final fadeX = exp(-2.5 * nx * nx);
-        final a = (fadeY * fadeX * 255).toInt().clamp(0, 255);
-        if (a < 1) continue;
-        m.setPixelRgba(x, y, (255 * fadeY).toInt().clamp(0, 200), (200 * fadeY).toInt().clamp(0, 255), (100 * fadeY).toInt().clamp(0, 255), a);
-      }
-    }
-    return _blurOverlay(m);
-  }
-
-  // ── Pattern 4: Bottom-edge horizontal streak ──
-  static img.Image _streakBottom(int w, int h) {
-    final m = img.Image(width: w, height: h, numChannels: 4);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        final ny = (h - 1 - y) / h;
-        final nx = (x / w - 0.4) * 2.0;
-        final fadeY = exp(-5.0 * ny);
-        final fadeX = exp(-2.0 * nx * nx);
-        final a = (fadeY * fadeX * 255).toInt().clamp(0, 255);
-        if (a < 1) continue;
-        m.setPixelRgba(x, y, 255, (140 * fadeY).toInt().clamp(0, 255), (40 * fadeY).toInt().clamp(0, 255), a);
-      }
-    }
-    return _blurOverlay(m);
-  }
-
-  // ── Pattern 5: Top-left corner glow ──
-  static img.Image _cornerGlow(int w, int h) {
+  /// Large warm glow from the left side.
+  static img.Image _leftSunburst(int w, int h) {
     final m = img.Image(width: w, height: h, numChannels: 4);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         final dx = x / w;
+        final vy = (y / h - 0.45) * 2.0;
+        final radialFade = exp(-2.5 * dx);
+        final vertFade = exp(-1.2 * vy * vy);
+        final softGlow = exp(-1.5 * dx) * exp(-0.8 * vy * vy);
+        final fade = (radialFade * vertFade * 0.7 + softGlow * 0.3).clamp(0.0, 1.0);
+        final a = (fade * 255).toInt().clamp(0, 255);
+        if (a < 1) continue;
+        m.setPixelRgba(x, y, 255, (200 * fade + 80 * (1 - fade)).toInt().clamp(0, 255), (80 * fade).toInt().clamp(0, 255), a);
+      }
+    }
+    return _blurOverlay(m);
+  }
+
+  /// Warm glow from the top-right corner.
+  static img.Image _topRightSunburst(int w, int h) {
+    final m = img.Image(width: w, height: h, numChannels: 4);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        final dx = 1.0 - x / w;
         final dy = y / h;
-        final dist = sqrt(dx * dx + dy * dy);
-        final a = exp(-3.5 * dist * dist) * 255;
+        final dist = sqrt(dx * dx * 0.7 + dy * dy * 1.3);
+        final fade = exp(-2.0 * dist);
+        final a = (fade * 255).toInt().clamp(0, 255);
         if (a < 1) continue;
-        m.setPixelRgba(x, y, 255, (220 * a / 255).toInt().clamp(0, 255), (120 * a / 255).toInt().clamp(0, 255), a.toInt().clamp(0, 255));
+        m.setPixelRgba(x, y, 255, (190 * fade + 60 * (1 - fade)).toInt().clamp(0, 255), (70 * fade).toInt().clamp(0, 255), a);
       }
     }
     return _blurOverlay(m);
   }
 
-  // ── Pattern 6: Bottom-right corner glow ──
-  static img.Image _cornerGlowFlip(int w, int h) {
+  /// Warm glow from the bottom-right corner.
+  static img.Image _bottomRightSunburst(int w, int h) {
     final m = img.Image(width: w, height: h, numChannels: 4);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
-        final dx = (w - 1 - x) / w;
-        final dy = (h - 1 - y) / h;
-        final dist = sqrt(dx * dx + dy * dy);
-        final a = exp(-4.0 * dist * dist) * 255;
+        final dx = 1.0 - x / w;
+        final dy = 1.0 - y / h;
+        final dist = sqrt(dx * dx * 0.7 + dy * dy * 1.3);
+        final fade = exp(-2.0 * dist);
+        final a = (fade * 255).toInt().clamp(0, 255);
         if (a < 1) continue;
-        m.setPixelRgba(x, y, (240 * a / 255).toInt().clamp(0, 255), (160 * a / 255).toInt().clamp(0, 255), (60 * a / 255).toInt().clamp(0, 255), a.toInt().clamp(0, 255));
+        m.setPixelRgba(x, y, 255, (190 * fade + 60 * (1 - fade)).toInt().clamp(0, 255), (70 * fade).toInt().clamp(0, 255), a);
       }
     }
     return _blurOverlay(m);
   }
 
-  // ── Pattern 7: Double streak (left + right) ──
-  static img.Image _doubleStreak(int w, int h) {
+  /// Large warm glow from the top edge.
+  static img.Image _topSunburst(int w, int h) {
     final m = img.Image(width: w, height: h, numChannels: 4);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
-        final ny = (y / h - 0.45) * 2.0;
-        final fadeY = exp(-2.5 * ny * ny);
-        // Left streak
-        final nxL = x / w;
-        final aL = exp(-5.0 * nxL) * fadeY * 200;
-        // Right streak
-        final nxR = (w - 1 - x) / w;
-        final aR = exp(-5.0 * nxR) * fadeY * 160;
-        final a = (aL + aR).clamp(0, 255).toInt();
+        final dy = y / h;
+        final vx = (x / w - 0.5) * 2.0;
+        final radialFade = exp(-2.5 * dy);
+        final horizFade = exp(-1.0 * vx * vx);
+        final softGlow = exp(-1.5 * dy) * exp(-0.6 * vx * vx);
+        final fade = (radialFade * horizFade * 0.7 + softGlow * 0.3).clamp(0.0, 1.0);
+        final a = (fade * 255).toInt().clamp(0, 255);
         if (a < 1) continue;
-        final r = ((255 * aL + 255 * aR) / (aL + aR + 1)).clamp(0, 255).toInt();
-        final g = ((180 * aL + 120 * aR) / (aL + aR + 1)).clamp(0, 255).toInt();
-        final b = ((60 * aL + 80 * aR) / (aL + aR + 1)).clamp(0, 255).toInt();
-        m.setPixelRgba(x, y, r, g, b, a);
+        m.setPixelRgba(x, y, 255, (200 * fade + 80 * (1 - fade)).toInt().clamp(0, 255), (90 * fade).toInt().clamp(0, 255), a);
       }
     }
     return _blurOverlay(m);
   }
 
-  // ── Pattern 8: Wide diffuse warm glow from left ──
-  static img.Image _wideGlow(int w, int h) {
+  /// Soft glow from the left-center area.
+  static img.Image _leftCenterGlow(int w, int h) {
     final m = img.Image(width: w, height: h, numChannels: 4);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
-        final nx = x / w;
+        final dx = x / w;
+        final vy = (y / h - 0.5) * 2.0;
+        final horizFade = exp(-3.0 * dx);
+        final edgeSoft = exp(-1.5 * dx);
+        final fade = (horizFade * 0.6 + edgeSoft * 0.4).clamp(0.0, 1.0);
+        final fadeY = exp(-0.8 * vy * vy);
+        final a = (fade * fadeY * 240).toInt().clamp(0, 255);
+        if (a < 1) continue;
+        m.setPixelRgba(x, y, 255, (200 * fade * fadeY).toInt().clamp(0, 255), (100 * fade * fadeY).toInt().clamp(0, 255), a);
+      }
+    }
+    return _blurOverlay(m);
+  }
+
+  /// Soft warm wash along the right edge — thin but tall.
+  static img.Image _edgeWash(int w, int h) {
+    final m = img.Image(width: w, height: h, numChannels: 4);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        final dx = 1.0 - x / w;
+        final vy = (y / h - 0.5) * 2.0;
+        final hFade = exp(-5.0 * dx);
+        final vFade = exp(-1.5 * vy * vy);
+        final soft = exp(-3.0 * dx) * exp(-1.0 * vy * vy);
+        final fade = (hFade * vFade * 0.5 + soft * 0.5).clamp(0.0, 1.0);
+        final a = (fade * 255).toInt().clamp(0, 255);
+        if (a < 1) continue;
+        m.setPixelRgba(x, y, 255, (210 * fade).toInt().clamp(0, 255), (100 * fade).toInt().clamp(0, 255), a);
+      }
+    }
+    return _blurOverlay(m);
+  }
+
+  /// Overall warm haze — subtle full-image warm wash, slightly right-biased.
+  static img.Image _warmHaze(int w, int h) {
+    final m = img.Image(width: w, height: h, numChannels: 4);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        final nx = (x / w - 0.5) * 2.0;
         final ny = (y / h - 0.5) * 2.0;
-        // Very soft wide glow
-        final fadeX = exp(-2.5 * nx);
-        final fadeY = exp(-1.5 * ny * ny);
-        final a = (fadeX * fadeY * 220).toInt().clamp(0, 255);
+        final dist = sqrt(nx * nx + ny * ny);
+        final fade = exp(-1.0 * dist);
+        final rightBias = exp(-1.5 * (1.0 - x / w));
+        final combined = (fade * 0.6 + rightBias * 0.4).clamp(0.0, 1.0);
+        final a = (combined * 200).toInt().clamp(0, 255);
         if (a < 1) continue;
-        m.setPixelRgba(x, y, 255, (190 * fadeX).toInt().clamp(0, 255), (100 * fadeX).toInt().clamp(0, 255), a);
+        m.setPixelRgba(x, y, 255, (220 * combined).toInt().clamp(0, 255), (120 * combined).toInt().clamp(0, 255), a);
       }
     }
     return _blurOverlay(m);
   }
 
-  // Apply a light blur to soften edges
+  /// Heavy Gaussian blur for soft, realistic glow edges.
   static img.Image _blurOverlay(img.Image src) {
-    return img.gaussianBlur(src, radius: 8);
+    return img.gaussianBlur(src, radius: 12);
   }
 }
 
@@ -600,8 +613,8 @@ class FilterProcessor {
 
   /// Add a light leak using pre-computed overlay textures.
   ///
-  /// Randomly selects from 8 cached overlay patterns, scales to target size,
-  /// and composites via screen blend. Much faster than procedural generation.
+  /// Randomly selects from cached overlay patterns, scales to target size,
+  /// applies color tint, and composites via screen blend.
   static void _addLightLeakToImage(
     img.Image image,
     String style,
@@ -621,7 +634,8 @@ class FilterProcessor {
     final overlay = overlays[rand.nextInt(overlays.length)];
 
     // Scale overlay to target size
-    final scaled = img.copyResize(overlay, width: width, height: height, interpolation: img.Interpolation.linear);
+    final scaled = img.copyResize(overlay,
+        width: width, height: height, interpolation: img.Interpolation.linear);
 
     // Apply color tint based on style
     _tintOverlay(scaled, style);
@@ -645,9 +659,15 @@ class FilterProcessor {
 
       // Screen blend: natural light accumulation
       p.setRgba(
-        (255.0 - (255.0 - r) * (1.0 - lr * alpha / 255.0)).clamp(0, 255).toInt(),
-        (255.0 - (255.0 - g) * (1.0 - lg * alpha / 255.0)).clamp(0, 255).toInt(),
-        (255.0 - (255.0 - b) * (1.0 - lb * alpha / 255.0)).clamp(0, 255).toInt(),
+        (255.0 - (255.0 - r) * (1.0 - lr * alpha / 255.0))
+            .clamp(0, 255)
+            .toInt(),
+        (255.0 - (255.0 - g) * (1.0 - lg * alpha / 255.0))
+            .clamp(0, 255)
+            .toInt(),
+        (255.0 - (255.0 - b) * (1.0 - lb * alpha / 255.0))
+            .clamp(0, 255)
+            .toInt(),
         p.a.toInt(),
       );
     }
@@ -655,17 +675,19 @@ class FilterProcessor {
 
   /// Tint overlay pixels based on leak style.
   static void _tintOverlay(img.Image overlay, String style) {
-    // Color multipliers for each style
     double rm, gm, bm;
     switch (style) {
       case 'COOL':
-        rm = 0.5; gm = 0.7; bm = 1.0;
+        rm = 0.5;
+        gm = 0.7;
+        bm = 1.0;
         break;
       case 'RED':
-        rm = 1.0; gm = 0.3; bm = 0.25;
+        rm = 1.0;
+        gm = 0.3;
+        bm = 0.25;
         break;
       case 'DOUBLE':
-        // Split tint — first half warm, second half cool
         for (final p in overlay) {
           final half = p.x < overlay.width ~/ 2;
           if (half) {
@@ -687,7 +709,9 @@ class FilterProcessor {
         return;
       case 'WARM':
       default:
-        rm = 1.0; gm = 0.75; bm = 0.3;
+        rm = 1.0;
+        gm = 0.75;
+        bm = 0.3;
         break;
     }
     for (final p in overlay) {
