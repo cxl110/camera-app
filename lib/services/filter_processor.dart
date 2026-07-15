@@ -32,6 +32,20 @@ class FilterProcessor {
     return _applyLocal(input, filterName);
   }
 
+  /// Downsample image for fast preview processing.
+  /// Returns the input unchanged if already small enough.
+  static Uint8List downsampleForPreview(Uint8List input, {int maxDim = 1000}) {
+    final image = img.decodeImage(input);
+    if (image == null) return input;
+    if (image.width <= maxDim && image.height <= maxDim) return input;
+
+    final resized = img.copyResize(image,
+        width: image.width >= image.height ? maxDim : null,
+        height: image.height > image.width ? maxDim : null,
+        interpolation: img.Interpolation.linear);
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+  }
+
   /// Convert display filter name to CoreML model name.
   static String _filterNameToModelName(String filterName) {
     // Map from display names used in EffectsScreen to model file names

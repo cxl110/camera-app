@@ -360,7 +360,8 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _onSaveFiltered() async {
     final imageService = context.read<ImageService>();
-    final output = _displayImage ?? imageService.currentPhoto;
+    // Use full-resolution output with effects applied
+    final output = _getFullResOutput() ?? _displayImage ?? imageService.currentPhoto;
     if (output == null) return;
     try {
       final neuralClient = NeuralFilterClient();
@@ -434,6 +435,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   /// Apply grain and light leak post-processing on top of [_baseFilteredImage].
+  /// Uses a downsampled preview for fast interactive feedback.
   void _applyPostEffects() {
     _postEffectTimer?.cancel();
     _postEffectTimer = Timer(const Duration(milliseconds: 150), () {
@@ -452,9 +454,10 @@ class _EffectsScreenState extends State<EffectsScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      // Run directly (no isolate) to avoid potential serialization issues
+      // Downsample for fast preview processing (~1000px max)
+      final preview = FilterProcessor.downsampleForPreview(base, maxDim: 1000);
       final result = FilterProcessor.applyPostEffects(
-        base,
+        preview,
         grainIntensity: grainI,
         lightLeakIntensity: leakI,
         lightLeakRange: leakRange,
@@ -468,7 +471,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
         _isProcessing = false;
       });
 
-      // Share with BORDERS
+      // Share with BORDERS (downsampled preview is fine for borders UI)
       context.read<ImageService>().updateCurrentPhoto(result);
     } catch (e) {
       debugPrint('[Effects] post-effects error: $e');
@@ -478,6 +481,26 @@ class _EffectsScreenState extends State<EffectsScreen> {
         _isProcessing = false;
       });
     }
+  }
+
+  /// Get full-resolution image with effects applied (for saving).
+  Uint8List? _getFullResOutput() {
+    final base = _baseFilteredImage;
+    if (base == null) return null;
+
+    final grainI = _grainEnabled ? _grainIntensity : 0.0;
+    final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
+    final leakI = leakRange > 0 ? (40.0 + leakRange * 0.6) : 0.0;
+
+    if (grainI <= 0 && leakI <= 0) return base;
+
+    return FilterProcessor.applyPostEffects(
+      base,
+      grainIntensity: grainI,
+      lightLeakIntensity: leakI,
+      lightLeakRange: leakRange,
+      lightLeakStyle: _lightLeakStyle,
+    );
   }
 
   @override
