@@ -55,9 +55,9 @@ jobs:
             --output-dir ./assets/models \
             --force
 
-      - name: Convert EDSR model to CoreML
-        if: steps.check_models.outputs.models_exist == 'false'
+      - name: Convert EDSR model to CoreML (always reconvert)
         run: |
+          rm -rf assets/models/edsr_base_x2.mlmodel assets/models/edsr_base_x2.mlmodelc
           python scripts/convert_models.py \
             --checkpoints-dir ./pretrained_checkpoints \
             --output-dir ./assets/models \

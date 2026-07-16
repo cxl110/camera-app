@@ -193,6 +193,9 @@ def convert_edsr_model(checkpoint_path: str, output_path: str, input_size: int =
             # Map residual block keys: body.X.body.0 / body.X.body.2 -> body.X.body_0 / body.X.body_2
             new_key = new_key.replace('.body.0.', '.body_0.')
             new_key = new_key.replace('.body.2.', '.body_2.')
+            # Checkpoint's body.16 (final conv after residual blocks) maps to model's body_last
+            if new_key.startswith('body.16.'):
+                new_key = 'body_last.' + new_key[8:]
             # Map tail keys: tail.0.0 -> tail.tail_0.0, tail.1 -> tail.tail_1
             if new_key.startswith('tail.0.'):
                 new_key = 'tail.tail_0.' + new_key[7:]
