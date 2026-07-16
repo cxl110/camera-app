@@ -302,12 +302,12 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     return
                 }
 
-                // For EDSR, use tile-based inference. The model does 2x upscaling
-                // (224 input -> 448 output), so the output scale is 2.
+                // For EDSR-Base x2: model expects 224x224 input tiles, produces 2x output.
+                // effectiveSize = patchSize + 2*padding = 192 + 32 = 224 → matches model.
                 let result = try self?.processTiled(
                     image: image,
                     model: model,
-                    patchSize: 224,
+                    patchSize: 192,
                     padding: 16,
                     outputScale: 2
                 )

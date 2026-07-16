@@ -815,23 +815,18 @@ class FilterProcessor {
         bm = 0.25;
         break;
       case 'DOUBLE':
+        // Warm on the left, cool on the right, smooth gradient across.
         for (final p in overlay) {
-          final half = p.x < overlay.width ~/ 2;
-          if (half) {
-            p.setRgba(
-              min(255, (p.r * 1.0).toInt()),
-              min(255, (p.g * 0.7).toInt()),
-              min(255, (p.b * 0.3).toInt()),
-              p.a.toInt(),
-            );
-          } else {
-            p.setRgba(
-              min(255, (p.r * 0.5).toInt()),
-              min(255, (p.g * 0.7).toInt()),
-              min(255, (p.b * 1.0).toInt()),
-              p.a.toInt(),
-            );
-          }
+          final t = p.x / max(overlay.width - 1, 1); // 0…1
+          // Warm → Cool: interpolate color multipliers smoothly.
+          final warmWt = 1.0 - t;  // 1 at left edge, 0 at right
+          final coolWt = t;        // 0 at left edge, 1 at right
+          p.setRgba(
+            min(255, (p.r * (1.0 * warmWt + 0.5 * coolWt)).toInt()),
+            min(255, (p.g * (0.7 * warmWt + 0.7 * coolWt)).toInt()),
+            min(255, (p.b * (0.3 * warmWt + 1.0 * coolWt)).toInt()),
+            p.a.toInt(),
+          );
         }
         return;
       case 'WARM':

@@ -100,35 +100,23 @@ class ImageService extends ChangeNotifier {
     return cacheFile;
   }
 
-  /// Save a photo with x2 super-resolution upscale.
+  /// Save a photo with optional x2 CoreML upscale.
   ///
-  /// Tries CoreML on-device upscale first, then neural server, falls back to original.
-  /// All save operations should go through this method.
+  /// Tries CoreML on-device upscale first; validates the result is not all-black
+  /// before accepting it. Falls back to the original image bytes if upscale fails
+  /// or produces invalid output.
   Future<File> saveWithUpscale(Uint8List imageBytes, String originalName,
       {NeuralFilterClient? neuralClient}) async {
-    // Try x2 super-resolution upscale — CoreML first (on-device)
     Uint8List finalBytes = imageBytes;
 
-    // Try CoreML on-device upscale
+    // Try CoreML on-device super-resolution upscale
     try {
       final coremlUpscaled = await CoreMLBridge.upscalePhoto(imageBytes: imageBytes);
-      if (coremlUpscaled != null) {
+      if (coremlUpscaled != null && !_isAllBlack(coremlUpscaled)) {
         finalBytes = coremlUpscaled;
       }
     } catch (_) {
-      // Fall through to neural server
-    }
-
-    // Fallback: try neural server
-    if (identical(finalBytes, imageBytes) && neuralClient != null) {
-      try {
-        final upscaled = await neuralClient.upscalePhoto(imageBytes);
-        if (upscaled != null) {
-          finalBytes = upscaled;
-        }
-      } catch (_) {
-        // Fall through to original bytes
-      }
+      // Fall through to original bytes
     }
 
     final name = p.basenameWithoutExtension(originalName);
@@ -158,6 +146,28 @@ class ImageService extends ChangeNotifier {
 
     notifyListeners();
     return file;
+  }
+
+  /// Quick check if JPEG bytes decode to a near-black image.
+  bool _isAllBlack(Uint8List bytes) {
+    try {
+      final image = img.decodeImage(bytes);
+      if (image == null) return true;
+      // Sample the center pixel + 4 corners
+      final w = image.width;
+      final h = image.height;
+      final samples = [
+        image.getPixel(w ~/ 2, h ~/ 2),
+        image.getPixel(0, 0),
+        image.getPixel(w - 1, 0),
+        image.getPixel(0, h - 1),
+        image.getPixel(w - 1, h - 1),
+      ];
+      // If all samples are very dark (< 10), treat as black
+      return samples.every((p) => p.r < 10 && p.g < 10 && p.b < 10);
+    } catch (_) {
+      return true;
+    }
   }
 
   /// Save an edited (filtered) image (without upscale).
