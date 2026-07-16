@@ -379,23 +379,35 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
         for row in 0..<rows {
             for col in 0..<cols {
                 // Calculate source region with padding
-                let srcX = max(0, col * patchSize - padding)
-                let srcY = max(0, row * patchSize - padding)
-                let srcWidth = min(effectiveSize, width - srcX)
-                let srcHeight = min(effectiveSize, height - srcY)
+                let srcX = col * patchSize - padding
+                let srcY = row * patchSize - padding
 
-                // Extract patch
-                guard let patchCGImage = cgImage.cropping(to: CGRect(
-                    x: srcX, y: srcY,
-                    width: srcWidth, height: srcHeight
-                )) else { continue }
+                // Padding on each side (only for edges that go outside image)
+                let padL = max(0, -srcX)
+                let padT = max(0, -srcY)
+                let padR = max(0, (srcX + effectiveSize) - width)
+                let padB = max(0, (srcY + effectiveSize) - height)
 
-                // If patch is smaller than effective size, pad with edge values
+                // Actual source crop from image
+                let cropX = srcX + padL
+                let cropY = srcY + padT
+                let cropW = effectiveSize - padL - padR
+                let cropH = effectiveSize - padT - padB
+
+                guard cropW > 0, cropH > 0,
+                      let patchCGImage = cgImage.cropping(to: CGRect(
+                        x: cropX, y: cropY,
+                        width: cropW, height: cropH
+                      )) else { continue }
+
+                // Pad tile: place crop at correct offset (padL, padT)
                 let patchImage: UIImage
-                if srcWidth < effectiveSize || srcHeight < effectiveSize {
-                    patchImage = padImage(
+                if padL > 0 || padT > 0 || padR > 0 || padB > 0 {
+                    patchImage = padTile(
                         UIImage(cgImage: patchCGImage),
-                        to: CGSize(width: effectiveSize, height: effectiveSize)
+                        to: CGSize(width: effectiveSize, height: effectiveSize),
+                        offsetX: padL,
+                        offsetY: padT
                     )
                 } else {
                     patchImage = UIImage(cgImage: patchCGImage)
@@ -406,14 +418,14 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     continue
                 }
 
-                // Remove padding and place in output. Padding is scaled on the
-                // output side for super-resolution.
-                let cropRect = CGRect(
-                    x: outPadding, y: outPadding,
-                    width: outPatchSize, height: outPatchSize
-                )
+                // Output crop: skip the scaled padding on left/top
+                let outCropX = padL * outputScale
+                let outCropY = padT * outputScale
 
-                guard let croppedCGImage = filteredPatch.cgImage?.cropping(to: cropRect) else {
+                guard let croppedCGImage = filteredPatch.cgImage?.cropping(to: CGRect(
+                    x: outCropX, y: outCropY,
+                    width: outPatchSize, height: outPatchSize
+                )) else {
                     continue
                 }
 
@@ -467,6 +479,7 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
     }
 
     /// Convert MLMultiArray back to UIImage.
+    /// Auto-detects output range: if values > 1 → [0,255] (EDSR), else [0,1] (filters).
     private func imageFromMultiArray(_ array: MLMultiArray) -> UIImage? {
         // Array shape: [1, 3, height, width] (channel first)
         let height = array.shape[2].intValue
@@ -478,9 +491,23 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
 
         let pointer = array.dataPointer.assumingMemoryBound(to: Float.self)
 
+        // Auto-detect output range: sample first 100 values
+        var needsScaling = false
+        let sampleCount = min(100, totalPixels * 3)
+        for i in 0..<sampleCount {
+            if pointer[i] > 2.0 {
+                needsScaling = false // values already in [0, 255]
+                break
+            }
+            if pointer[i] <= 1.0 && i == sampleCount - 1 {
+                needsScaling = true // all sampled values in [0, 1]
+            }
+        }
+        let scale: Float = needsScaling ? 255.0 : 1.0
+
         for c in 0..<3 {
             for i in 0..<totalPixels {
-                let val = pointer[c * totalPixels + i] * 255.0
+                let val = pointer[c * totalPixels + i] * scale
                 rgbaData[i * 4 + c] = UInt8(min(max(val, 0), 255))
             }
         }
@@ -503,12 +530,29 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
         return UIImage(cgImage: cgImage)
     }
 
-    /// Pad an image to fill target size (edge replication).
-    private func padImage(_ image: UIImage, to size: CGSize) -> UIImage {
+    /// Pad a tile image: place content at (offsetX, offsetY), fill rest with edge color.
+    private func padTile(_ image: UIImage, to size: CGSize, offsetX: Int, offsetY: Int) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
-            // Draw original at (0,0) — remaining area is transparent black
-            image.draw(in: CGRect(origin: .zero, size: image.size))
+            // Fill with edge pixel color to replicate border
+            if let cgImg = image.cgImage,
+               let edgeCtx = CGContext(
+                data: nil, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+               ) {
+                edgeCtx.draw(cgImg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                if let edgeData = edgeCtx.data?.assumingMemoryBound(to: UInt8.self) {
+                    let r = CGFloat(edgeData[0]) / 255.0
+                    let g = CGFloat(edgeData[1]) / 255.0
+                    let b = CGFloat(edgeData[2]) / 255.0
+                    UIColor(red: r, green: g, blue: b, alpha: 1.0).setFill()
+                    ctx.fill(CGRect(origin: .zero, size: size))
+                }
+            }
+            image.draw(in: CGRect(x: CGFloat(offsetX), y: CGFloat(offsetY),
+                                  width: image.size.width, height: image.size.height))
         }
     }
 

@@ -219,7 +219,11 @@ def convert_edsr_model(checkpoint_path: str, output_path: str, input_size: int =
     input_tensor = torch.rand(size=(1, 3, input_size, input_size))
     traced_model = torch.jit.trace(model, input_tensor)
 
-    # Convert to CoreML
+    # Convert to CoreML.
+    # NOTE: scale=1.0 (NOT 1/255.0). The EDSR checkpoint was trained on [0,255]
+    # input — its sub_mean/add_mean Conv2d layers subtract/add the RGB mean in
+    # that range.  Using 1/255 would normalize to [0,1], making sub_mean produce
+    # large negative values → near-zero output (very dark image).
     print(f"  Converting to CoreML...")
     mlmodel = ct.convert(
         traced_model,
@@ -231,7 +235,8 @@ def convert_edsr_model(checkpoint_path: str, output_path: str, input_size: int =
                 shape=input_tensor.shape,
                 channel_first=True,
                 color_layout=ct.colorlayout.RGB,
-                scale=1 / 255.0,
+                scale=1.0,
+                bias=[0.0, 0.0, 0.0],
             )
         ],
         outputs=[ct.TensorType(name="output")],
