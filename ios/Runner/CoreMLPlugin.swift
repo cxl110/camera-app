@@ -473,26 +473,30 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
         let width = array.shape[3].intValue
 
         let totalPixels = height * width
-        var rgbData = [UInt8](repeating: 0, count: totalPixels * 3)
+        // Use 4 bytes per pixel (RGBA) — RGB w/o alpha fails on iOS 18+
+        var rgbaData = [UInt8](repeating: 0, count: totalPixels * 4)
 
         let pointer = array.dataPointer.assumingMemoryBound(to: Float.self)
 
         for c in 0..<3 {
             for i in 0..<totalPixels {
                 let val = pointer[c * totalPixels + i] * 255.0
-                rgbData[i * 3 + c] = UInt8(min(max(val, 0), 255))
+                rgbaData[i * 4 + c] = UInt8(min(max(val, 0), 255))
             }
+        }
+        for i in 0..<totalPixels {
+            rgbaData[i * 4 + 3] = 255
         }
 
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         guard let context = CGContext(
-            data: &rgbData,
+            data: &rgbaData,
             width: width,
             height: height,
             bitsPerComponent: 8,
-            bytesPerRow: width * 3,
+            bytesPerRow: width * 4,
             space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.none.rawValue
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
         ) else { return nil }
 
         guard let cgImage = context.makeImage() else { return nil }
