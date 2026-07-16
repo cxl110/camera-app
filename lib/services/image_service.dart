@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
@@ -131,9 +132,16 @@ class ImageService extends ChangeNotifier {
     }
 
     final name = p.basenameWithoutExtension(originalName);
-    final outputPath = p.join(_editedDir!.path, '${name}_x2.jpg');
+    final outputPath = p.join(_editedDir!.path, '${name}.jpg');
     final file = File(outputPath);
     await file.writeAsBytes(finalBytes);
+
+    // Also save to system photo gallery so it shows in Photos.app
+    try {
+      await ImageGallerySaver.saveImage(finalBytes);
+    } catch (_) {
+      // Non-fatal — file is still saved to local storage
+    }
 
     _recentEdits.insert(
       0,

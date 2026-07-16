@@ -374,7 +374,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已保存 $_selectedPreset (x2超分)'),
+          content: Text('已保存 $_selectedPreset'),
           backgroundColor: const Color(0xFF2E7D32),
           duration: const Duration(seconds: 2),
         ),

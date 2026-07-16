@@ -30,8 +30,8 @@ dependencies:
   http: ^1.2.2
   connectivity_plus: ^6.1.0
 
-  # Sharing & export
-  share_plus: ^10.1.2
+  # Gallery save (system photo library)
+  image_gallery_saver: ^2.0.3
 
   # CoreML inference is handled via native platform channel (ios/Runner/CoreMLPlugin.swift)
 

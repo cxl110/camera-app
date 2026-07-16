@@ -344,7 +344,7 @@ class _BordersScreenState extends State<BordersScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已保存 (边框: $_selectedBorder, x2超分)'),
+          content: Text('已保存 (边框: $_selectedBorder)'),
           backgroundColor: const Color(0xFF2E7D32),
           duration: const Duration(seconds: 2),
         ),
