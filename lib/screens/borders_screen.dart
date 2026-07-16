@@ -21,6 +21,7 @@ class BordersScreen extends StatefulWidget {
 class _BordersScreenState extends State<BordersScreen> {
   String? _selectedBorder;
   double _borderThickness = 100;
+  bool _isSaving = false;
 
   static const _borderFiles = [
     'frame_19.png',  // 50% border
@@ -135,11 +136,11 @@ class _BordersScreenState extends State<BordersScreen> {
           const Spacer(),
           IconButton(
             icon: Icon(Icons.save_alt,
-                color: (_selectedBorder != null && imageService.currentPhoto != null
+                color: (_selectedBorder != null && imageService.currentPhoto != null && !_isSaving
                     ? Colors.white
                     : Colors.white.withValues(alpha: 0.2)).withValues(alpha: 0.7),
                 size: 22),
-            onPressed: (_selectedBorder != null && imageService.currentPhoto != null) ? _onSave : null,
+            onPressed: (_selectedBorder != null && imageService.currentPhoto != null && !_isSaving) ? _onSave : null,
             tooltip: '保存',
           ),
           IconButton(
@@ -154,6 +155,9 @@ class _BordersScreenState extends State<BordersScreen> {
   }
 
   Widget _buildPreview(ImageService imageService) {
+    final previewWidth = MediaQuery.of(context).size.width - 32;
+    final indicatorSize = previewWidth / 3;
+
     return Container(
       height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -185,6 +189,24 @@ class _BordersScreenState extends State<BordersScreen> {
               Center(
                 child: Icon(Icons.image_outlined, size: 64,
                     color: Colors.white.withValues(alpha: 0.1)),
+              ),
+
+            // ── Saving progress overlay ──
+            if (_isSaving)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  child: Center(
+                    child: SizedBox(
+                      width: indicatorSize,
+                      height: indicatorSize,
+                      child: const CircularProgressIndicator(
+                        strokeWidth: 3,
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD89A0F)),
+                      ),
+                    ),
+                  ),
+                ),
               ),
           ],
         ),
@@ -330,6 +352,8 @@ class _BordersScreenState extends State<BordersScreen> {
     final base = imageService.currentPhoto;
     if (base == null || _selectedBorder == null) return;
 
+    setState(() => _isSaving = true);
+
     try {
       // Composite the frame onto the photo (frame stretched, photo undistorted)
       final bordered = await imageService.compositeBorder(base, _selectedBorder!);
@@ -354,6 +378,8 @@ class _BordersScreenState extends State<BordersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
       );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 }

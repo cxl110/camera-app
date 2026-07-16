@@ -46,6 +46,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
   // Debounce timer for post-effect slider changes
   Timer? _postEffectTimer;
   bool _isProcessing = false;
+  bool _isSaving = false;
 
   // Film presets
   String _selectedPreset = 'NONE';
@@ -236,7 +237,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
           const Spacer(),
           IconButton(
             icon: Icon(Icons.save_alt, color: Colors.white.withValues(alpha: 0.7), size: 22),
-            onPressed: imageService.currentPhoto != null ? _onSaveFiltered : null,
+            onPressed: (imageService.currentPhoto != null && !_isSaving) ? _onSaveFiltered : null,
             tooltip: '保存',
           ),
           IconButton(
@@ -250,6 +251,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   Widget _buildPreviewArea(ImageService imageService, Uint8List? displayBytes) {
+    final previewWidth = MediaQuery.of(context).size.width - 32; // horizontal margin
+    final indicatorSize = previewWidth / 3;
+
     return Container(
       height: MediaQuery.of(context).size.height * 0.42,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -322,6 +326,27 @@ class _EffectsScreenState extends State<EffectsScreen> {
               ],
             ),
           ),
+
+          // ── Saving progress overlay ──
+          if (_isSaving)
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Center(
+                  child: SizedBox(
+                    width: indicatorSize,
+                    height: indicatorSize,
+                    child: const CircularProgressIndicator(
+                      strokeWidth: 3,
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD89A0F)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -364,6 +389,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
     // Use full-resolution output with effects applied
     final output = _getFullResOutput() ?? _displayImage ?? imageService.currentPhoto;
     if (output == null) return;
+
+    setState(() => _isSaving = true);
+
     try {
       final neuralClient = NeuralFilterClient();
       await imageService.saveWithUpscale(
@@ -384,6 +412,8 @@ class _EffectsScreenState extends State<EffectsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
       );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 

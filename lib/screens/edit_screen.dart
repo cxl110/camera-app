@@ -24,6 +24,7 @@ class EditScreen extends StatefulWidget {
 class _EditScreenState extends State<EditScreen> {
   File? _filteredFile;
   bool _showOriginal = false;
+  bool _isSaving = false;
   final double _intensity = 0.5;
 
   @override
@@ -51,7 +52,7 @@ class _EditScreenState extends State<EditScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.save_outlined),
-            onPressed: _saveImage,
+            onPressed: _isSaving ? null : _saveImage,
             tooltip: '保存',
           ),
           IconButton(
@@ -68,12 +69,33 @@ class _EditScreenState extends State<EditScreen> {
             child: GestureDetector(
               onLongPressStart: (_) => setState(() => _showOriginal = true),
               onLongPressEnd: (_) => setState(() => _showOriginal = false),
-              child: Center(
-                child: _showOriginal
-                    ? Image.file(widget.imageFile, fit: BoxFit.contain)
-                    : (_filteredFile != null
-                        ? Image.file(_filteredFile!, fit: BoxFit.contain)
-                        : Image.file(widget.imageFile, fit: BoxFit.contain)),
+              child: Stack(
+                children: [
+                  Center(
+                    child: _showOriginal
+                        ? Image.file(widget.imageFile, fit: BoxFit.contain)
+                        : (_filteredFile != null
+                            ? Image.file(_filteredFile!, fit: BoxFit.contain)
+                            : Image.file(widget.imageFile, fit: BoxFit.contain)),
+                  ),
+                  // ── Saving progress overlay ──
+                  if (_isSaving)
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        child: Center(
+                          child: SizedBox(
+                            width: MediaQuery.of(context).size.width / 3,
+                            height: MediaQuery.of(context).size.width / 3,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 3,
+                              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD89A0F)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -255,6 +277,8 @@ class _EditScreenState extends State<EditScreen> {
       return;
     }
 
+    setState(() => _isSaving = true);
+
     try {
       final imageService = context.read<ImageService>();
       final bytes = await _filteredFile!.readAsBytes();
@@ -274,6 +298,8 @@ class _EditScreenState extends State<EditScreen> {
           SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
