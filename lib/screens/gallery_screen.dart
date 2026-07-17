@@ -127,8 +127,10 @@ class _GalleryScreenState extends State<GalleryScreen> {
       } catch (_) {}
 
       if (!mounted) return;
+      final finalBytes = bytes;
+      if (finalBytes == null) return;
       Navigator.pop(context); // dismiss progress
-      context.read<ImageService>().loadPhoto(bytes, name: photo.name);
+      context.read<ImageService>().loadPhoto(finalBytes, name: photo.name);
       Navigator.pop(context); // back to home → user can go to EFFECTS
     } catch (e) {
       if (!mounted) return;
@@ -194,7 +196,10 @@ class _GalleryScreenState extends State<GalleryScreen> {
         setState(() => _currentProgress = 0.8);
 
         // Save
-        await imageService.saveWithUpscale(bytes, photo.name);
+        final saveBytes = bytes;
+        if (saveBytes != null) {
+          await imageService.saveWithUpscale(saveBytes, photo.name);
+        }
       } catch (_) {
         // Continue with next photo
       }
