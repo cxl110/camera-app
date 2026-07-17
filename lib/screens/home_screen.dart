@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
-import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
@@ -12,6 +11,7 @@ import '../widgets/capture_controls.dart';
 import '../widgets/bottom_tabs.dart';
 import 'effects_screen.dart';
 import 'borders_screen.dart';
+import 'gallery_screen.dart';
 
 /// Main camera screen.
 class HomeScreen extends StatefulWidget {
@@ -290,64 +290,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onOpenGallery() async {
     if (!_isConnected) return;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('正在打开相册...'),
-        backgroundColor: Color(0xFF1A1A2E),
-        duration: Duration(seconds: 1),
-      ),
+    _stopLiveView();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GalleryScreen()),
     );
-
-    try {
-      final result = await _protocol.listPhotos(limit: 20);
-      if (!mounted) return;
-
-      if (result.photos.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('相机中没有照片'),
-            backgroundColor: Color(0xFF1A1A2E),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        return;
-      }
-
-      // Load the first photo's full-resolution image
-      final first = result.photos.first;
-      Uint8List? bytes = first.fullImage;
-
-      // If protocol doesn't preload fullImage (e.g. HttpCameraProtocol),
-      // download it now.
-      if (bytes == null && _protocol is HttpCameraProtocol) {
-        bytes = await (_protocol as HttpCameraProtocol).downloadPhotoBytes(first.id);
-      }
-
-      // Fallback to thumbnail if full download failed
-      bytes ??= first.thumbnail;
-
-      if (bytes != null) {
-        context.read<ImageService>().loadPhoto(bytes, name: first.name);
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('已加载 ${result.photos.length} 张照片'),
-          backgroundColor: const Color(0xFF1A1A2E),
-          duration: const Duration(seconds: 1),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('加载失败，请重试'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+    if (_isConnected) _startLiveView();
   }
 
   void _onShutterPressed() async {
