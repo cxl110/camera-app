@@ -11,16 +11,12 @@ import 'package:flutter/material.dart';
 class CaptureControls extends StatelessWidget {
   final Uint8List? lastPhoto;
   final VoidCallback onShutter;
-  final VoidCallback onRecord;
-  final bool isRecording;
   final bool enabled;
 
   const CaptureControls({
     super.key,
     this.lastPhoto,
     required this.onShutter,
-    required this.onRecord,
-    this.isRecording = false,
     this.enabled = true,
   });
 
@@ -41,14 +37,6 @@ class CaptureControls extends StatelessWidget {
 
           // ── Center: Shutter ──
           _ShutterButton(onTap: onShutter, enabled: enabled),
-          const SizedBox(width: 0),
-
-          // ── Right: Record ──
-          _RecordButton(
-            onTap: onRecord,
-            isRecording: isRecording,
-            enabled: enabled,
-          ),
         ],
       ),
     );
@@ -140,79 +128,6 @@ class _ShutterButtonState extends State<_ShutterButton> {
                 width: 3,
               ),
               color: enabled ? Colors.white : const Color(0xFF555555),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Red circular record button.
-class _RecordButton extends StatefulWidget {
-  final VoidCallback onTap;
-  final bool isRecording;
-  final bool enabled;
-
-  const _RecordButton({
-    required this.onTap,
-    this.isRecording = false,
-    this.enabled = true,
-  });
-
-  @override
-  State<_RecordButton> createState() => _RecordButtonState();
-}
-
-class _RecordButtonState extends State<_RecordButton> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = widget.enabled;
-    final bool active = widget.isRecording || _pressed;
-
-    return GestureDetector(
-      onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
-      onTapUp: enabled
-          ? (_) {
-              setState(() => _pressed = false);
-              widget.onTap();
-            }
-          : null,
-      onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: enabled
-              ? (active ? const Color(0xFFD32F2F) : const Color(0xFFC62828))
-              : const Color(0xFF555555),
-          boxShadow: active && enabled
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFFC62828).withValues(alpha: 0.5),
-                    blurRadius: 8,
-                  )
-                ]
-              : [],
-        ),
-        child: Center(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: widget.isRecording ? 18 : 40,
-            height: widget.isRecording ? 18 : 40,
-            decoration: BoxDecoration(
-              shape: widget.isRecording ? BoxShape.rectangle : BoxShape.circle,
-              borderRadius: widget.isRecording
-                  ? BorderRadius.circular(3)
-                  : null,
-              border: Border.all(color: Colors.white, width: 2),
-              color: widget.isRecording
-                  ? Colors.white
-                  : Colors.transparent,
             ),
           ),
         ),

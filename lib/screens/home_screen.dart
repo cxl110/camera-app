@@ -24,7 +24,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isConnected = false;
   bool _isVerifying = true;
-  bool _isRecording = false;
   String _activeTab = 'CAMERA';
   String? _cameraModel;
 
@@ -215,8 +214,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               builder: (_, currentPhoto, __) => CaptureControls(
                 lastPhoto: currentPhoto,
                 onShutter: _onShutterPressed,
-                onRecord: _onRecordPressed,
-                isRecording: _isRecording,
                 enabled: _isConnected,
               ),
             ),
@@ -324,42 +321,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         SnackBar(
           content: Text('拍照失败: $e'),
           backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  void _onRecordPressed() async {
-    if (!_isConnected) return;
-    if (_isRecording) {
-      try {
-        final result = await _protocol.stopRecording();
-        if (!mounted) return;
-        setState(() => _isRecording = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⏹ ${result.name}'),
-            backgroundColor: const Color(0xFF1A1A2E),
-            duration: const Duration(milliseconds: 800),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(bottom: 160),
-          ),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _isRecording = false);
-      }
-    } else {
-      await _protocol.startRecording();
-      if (!mounted) return;
-      setState(() => _isRecording = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🔴 录制中...'),
-          backgroundColor: Color(0xFFC62828),
-          duration: Duration(milliseconds: 800),
-          behavior: SnackBarBehavior.floating,
-          margin: EdgeInsets.only(bottom: 160),
         ),
       );
     }
