@@ -77,11 +77,15 @@ class _GalleryScreenState extends State<GalleryScreen> {
     });
   }
 
-  void _onLongPress(String id) {
-    if (!_selectMode) {
-      setState(() => _selectMode = true);
-    }
-    _toggleSelect(id);
+  void _enterSelectMode() {
+    setState(() => _selectMode = true);
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _selectedIds.clear();
+    });
   }
 
   void _onTap(String id) {
@@ -297,18 +301,20 @@ class _GalleryScreenState extends State<GalleryScreen> {
       actions: [
         if (_selectMode)
           TextButton(
-            onPressed: () => setState(() {
-              _selectMode = false;
-              _selectedIds.clear();
-            }),
+            onPressed: _exitSelectMode,
             child: const Text('取消', style: TextStyle(color: Color(0xFFD89A0F))),
           )
-        else
+        else ...[
+          TextButton(
+            onPressed: _photos.isNotEmpty ? _enterSelectMode : null,
+            child: const Text('选择', style: TextStyle(color: Color(0xFFD89A0F), fontSize: 14)),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white54, size: 22),
             onPressed: _loading ? null : _loadPhotos,
             tooltip: '刷新',
           ),
+        ],
       ],
     );
   }
@@ -380,7 +386,6 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
     return GestureDetector(
       onTap: () => _onTap(photo.id),
-      onLongPressStart: (_) => _onLongPress(photo.id),
       child: Stack(
         fit: StackFit.expand,
         children: [
