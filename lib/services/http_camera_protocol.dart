@@ -185,7 +185,7 @@ class HttpCameraProtocol extends CameraProtocol {
 
   @override
   Future<CaptureResult> capturePhoto({bool flash = false}) async {
-    // POST /capture — trigger photo capture
+    // POST /capture — trigger photo capture, returns {status, filename}
     final capResponse = await _client
         .post(Uri.parse('$baseUrl/capture'))
         .timeout(const Duration(seconds: 5));
@@ -194,21 +194,21 @@ class HttpCameraProtocol extends CameraProtocol {
       throw Exception('Capture failed: HTTP ${capResponse.statusCode}');
     }
 
-    // After capture, fetch the latest photo from list
-    final listResult = await listPhotos(limit: 1);
-    if (listResult.photos.isEmpty) {
-      throw Exception('Capture succeeded but no photo found in list');
+    final capResult = jsonDecode(capResponse.body) as Map<String, dynamic>;
+    final filename = capResult['filename'] as String?;
+    if (filename == null || capResult['status'] != 'ok') {
+      throw Exception('Capture failed: unexpected response');
     }
 
-    final photo = listResult.photos.first;
-    final fullImage = await downloadPhotoBytes(photo.id);
-    final thumbnail = photo.thumbnail ?? await getThumbnail(photo.id);
+    // Download the captured photo directly
+    final fullImage = await downloadPhotoBytes(filename);
+    final thumbnail = await _getThumbnailBytes(filename);
 
     return CaptureResult(
-      id: photo.id,
-      name: photo.name,
-      sizeBytes: fullImage?.length ?? photo.sizeBytes,
-      timestamp: photo.timestamp,
+      id: filename,
+      name: filename,
+      sizeBytes: fullImage?.length ?? 0,
+      timestamp: DateTime.now(),
       thumbnail: thumbnail ?? fullImage,
       fullImage: fullImage ?? thumbnail,
     );
@@ -235,42 +235,46 @@ class HttpCameraProtocol extends CameraProtocol {
     String sort = 'date_desc',
   }) async {
     try {
-      final response = await _client
-          .get(Uri.parse('$baseUrl/list'))
-          .timeout(_timeout);
+      final uri = Uri.parse('$baseUrl/list').replace(
+        queryParameters: {
+          'offset': offset.toString(),
+          'limit': limit.toString(),
+        },
+      );
+      final response = await _client.get(uri).timeout(_timeout);
 
       if (response.statusCode != 200) {
         return const PhotoListResult(total: 0, offset: 0, limit: 0, photos: []);
       }
 
-      final List<dynamic> rawList = jsonDecode(response.body) as List<dynamic>;
+      final Map<String, dynamic> body =
+          jsonDecode(response.body) as Map<String, dynamic>;
 
-      // Parse file entries
-      final entries = rawList.map((e) => _FileEntry.fromJson(e as Map<String, dynamic>)).toList();
+      final total = (body['total'] as num?)?.toInt() ?? 0;
+      final files = (body['files'] as List<dynamic>?)
+              ?.map((e) => _FileEntry.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [];
 
       // Sort: newest first (filename contains YYYYMMDD_HHMMSS, lexicographic = chronological)
-      entries.sort((a, b) => b.name.compareTo(a.name));
-
-      // Apply pagination
-      final total = entries.length;
-      final page = entries.skip(offset).take(limit).toList();
+      files.sort((a, b) => b.name.compareTo(a.name));
 
       // Build CameraPhoto list — fetch thumbnails concurrently (max 6 at a time)
       final photos = <CameraPhoto>[];
       final semaphore = _Semaphore(6);
 
-      await Future.wait(page.map((entry) async {
+      await Future.wait(files.map((entry) async {
         await semaphore.acquire();
         try {
           Uint8List? thumbnail;
-          try {
-            thumbnail = await _getThumbnailBytes(entry.name);
-          } catch (_) {
-            // Thumbnail fetch failure is non-fatal
+          if (entry.type == 'photo') {
+            try {
+              thumbnail = await _getThumbnailBytes(entry.name);
+            } catch (_) {}
           }
 
           photos.add(CameraPhoto(
-            id: entry.name, // filename as id
+            id: entry.name,
             name: entry.name,
             sizeBytes: entry.size,
             timestamp: entry.mtime,
