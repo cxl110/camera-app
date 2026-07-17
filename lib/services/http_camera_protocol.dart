@@ -165,13 +165,8 @@ class HttpCameraProtocol extends CameraProtocol {
   @override
   Future<void> stopLiveView() async {
     _liveViewRunning = false;
-    final response = _liveViewResponse;
     _liveViewResponse = null;
-    if (response != null) {
-      try {
-        await response.cancel();
-      } catch (_) {}
-    }
+    // The stream will detect _liveViewRunning==false and stop itself
   }
 
   /// Find first occurrence of [needle] in [haystack], starting from [start].
