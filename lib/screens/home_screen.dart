@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
+import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
@@ -108,7 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onOpenGallery() async {
-    // 显示加载提示
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -125,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (result.photos.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('未选择照片或相册为空'),
+            content: Text('相机中没有照片'),
             backgroundColor: Color(0xFF1A1A2E),
             duration: Duration(seconds: 2),
           ),
@@ -133,9 +133,19 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // 加载到共享的当前照片
+      // Load the first photo's full-resolution image
       final first = result.photos.first;
-      final bytes = first.fullImage ?? first.thumbnail;
+      Uint8List? bytes = first.fullImage;
+
+      // If protocol doesn't preload fullImage (e.g. HttpCameraProtocol),
+      // download it now.
+      if (bytes == null && _protocol is HttpCameraProtocol) {
+        bytes = await (_protocol as HttpCameraProtocol).downloadPhotoBytes(first.id);
+      }
+
+      // Fallback to thumbnail if full download failed
+      bytes ??= first.thumbnail;
+
       if (bytes != null) {
         context.read<ImageService>().loadPhoto(bytes, name: first.name);
       }

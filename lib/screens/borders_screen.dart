@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
+import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/neural_filter_client.dart';
 import '../widgets/bottom_tabs.dart';
@@ -336,8 +337,20 @@ class _BordersScreenState extends State<BordersScreen> {
     try {
       final result = await protocol.listPhotos(limit: 20);
       if (!mounted) return;
-      if (result.photos.isNotEmpty && result.photos.first.fullImage != null) {
-        imageService.loadPhoto(result.photos.first.fullImage!, name: result.photos.first.name);
+      if (result.photos.isNotEmpty) {
+        final first = result.photos.first;
+        Uint8List? bytes = first.fullImage;
+
+        // Download full image if protocol doesn't preload it
+        if (bytes == null && protocol is HttpCameraProtocol) {
+          bytes = await (protocol as HttpCameraProtocol).downloadPhotoBytes(first.id);
+        }
+
+        bytes ??= first.thumbnail;
+
+        if (bytes != null) {
+          imageService.loadPhoto(bytes, name: first.name);
+        }
       }
     } catch (e) {
       if (!mounted) return;

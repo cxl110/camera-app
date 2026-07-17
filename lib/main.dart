@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import 'app.dart';
 import 'services/filter_service.dart';
 import 'services/camera_protocol.dart';
-import 'services/mock_camera_protocol.dart';
+import 'services/http_camera_protocol.dart';
 import 'services/neural_filter_client.dart';
 import 'services/filter_processor.dart';
 import 'services/image_service.dart';
@@ -32,7 +32,7 @@ void main() async {
   final filterService = FilterService();
   filterService.initialize().catchError((_) {});
 
-  final cameraProtocol = MockCameraProtocol();
+  final cameraProtocol = HttpCameraProtocol();
   FilterProcessor.setNeuralBackend(NeuralFilterClient());
 
   final imageService = ImageService();

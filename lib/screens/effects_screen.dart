@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
 import '../services/filter_processor.dart';
+import '../services/http_camera_protocol.dart';
 import '../widgets/film_presets.dart';
 import '../widgets/grain_control.dart';
 import '../widgets/light_leak_control.dart';
@@ -361,8 +362,17 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
       if (result.photos.isNotEmpty) {
         final firstPhoto = result.photos.first;
-        if (firstPhoto.fullImage != null) {
-          imageService.loadPhoto(firstPhoto.fullImage!, name: firstPhoto.name);
+        Uint8List? bytes = firstPhoto.fullImage;
+
+        // Download full image if protocol doesn't preload it
+        if (bytes == null && protocol is HttpCameraProtocol) {
+          bytes = await (protocol as HttpCameraProtocol).downloadPhotoBytes(firstPhoto.id);
+        }
+
+        bytes ??= firstPhoto.thumbnail;
+
+        if (bytes != null) {
+          imageService.loadPhoto(bytes, name: firstPhoto.name);
           // _originalSource will be detected in build() → triggers _applyFilter
         }
         ScaffoldMessenger.of(context).showSnackBar(
