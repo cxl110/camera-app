@@ -9,9 +9,8 @@ import 'camera_protocol.dart';
 /// V821CAM HTTP protocol implementation.
 ///
 /// Communicates with the DIY camera dev board over WiFi.
-/// The dev board is a passive storage device — it does NOT support
-/// live view, capture, or recording. Only file listing, download,
-/// thumbnail, and delete are available.
+/// Provides live view (MJPEG stream), photo capture, file listing,
+/// download, thumbnail, and delete.
 ///
 /// Spec: C:\H3\APP\HTTPAPI\V821CAM-HTTP-API.md
 class HttpCameraProtocol extends CameraProtocol {
@@ -24,6 +23,8 @@ class HttpCameraProtocol extends CameraProtocol {
       StreamController<ConnectionStatus>.broadcast();
 
   ConnectionStatus? _lastStatus;
+  http.StreamedResponse? _liveViewResponse;
+  bool _liveViewRunning = false;
 
   HttpCameraProtocol({String? baseUrl, http.Client? client})
       : baseUrl = (baseUrl ?? _defaultBaseUrl).replaceAll(RegExp(r'/$'), ''),
@@ -43,15 +44,22 @@ class HttpCameraProtocol extends CameraProtocol {
 
       if (response.statusCode == 200) {
         final info = jsonDecode(response.body) as Map<String, dynamic>;
-        final status = ConnectionStatus(
-          connected: true,
-          ssid: info['ssid'] as String? ?? 'V821CAM',
-          signalStrength: 3,
-          cameraBrand: info['model'] as String? ?? 'V821',
-          cameraModel: info['fw'] as String?,
-        );
-        _emitStatus(status);
-        return status;
+        final model = info['model'] as String? ?? '';
+        final fw = info['fw'] as String? ?? '';
+        final ssid = info['ssid'] as String? ?? 'V821CAM';
+
+        // Only V821 devices are supported
+        if (model == 'V821') {
+          final status = ConnectionStatus(
+            connected: true,
+            ssid: ssid,
+            signalStrength: 3,
+            cameraBrand: model,
+            cameraModel: fw,
+          );
+          _emitStatus(status);
+          return status;
+        }
       }
     } catch (_) {
       // Not connected
@@ -69,23 +77,146 @@ class HttpCameraProtocol extends CameraProtocol {
     }
   }
 
-  // ── Live View (unsupported) ──
+  // ── Live View (MJPEG stream) ──
 
   @override
   Stream<Uint8List> startLiveView() {
-    throw UnsupportedError('V821CAM does not support live view');
+    if (_liveViewRunning) {
+      throw StateError('Live view is already running');
+    }
+
+    final controller = StreamController<Uint8List>();
+
+    _liveViewRunning = true;
+
+    () async {
+      try {
+        final request = http.Request('GET', Uri.parse('$baseUrl/stream'));
+        _liveViewResponse = await _client.send(request).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw TimeoutException('Live view connection timeout'),
+        );
+
+        if (_liveViewResponse!.statusCode != 200) {
+          throw Exception('Live view unavailable: HTTP ${_liveViewResponse!.statusCode}');
+        }
+
+        // Parse MJPEG multipart stream
+        const boundary = '--mjpegstream';
+        final boundaryBytes = boundary.codeUnits;
+        final headerEnd = '\r\n\r\n'.codeUnits;
+
+        var buffer = <int>[];
+
+        await for (final chunk in _liveViewResponse!.stream) {
+          if (!_liveViewRunning) break;
+
+          buffer.addAll(chunk);
+
+          // Search for complete frames
+          while (_liveViewRunning && buffer.length > boundaryBytes.length) {
+            // Find boundary start
+            final boundaryIndex = _indexOfBytes(buffer, boundaryBytes);
+            if (boundaryIndex < 0) break;
+
+            // Find next boundary after this one
+            final nextBoundary = _indexOfBytes(
+              buffer,
+              boundaryBytes,
+              start: boundaryIndex + boundaryBytes.length,
+            );
+
+            if (nextBoundary < 0) break; // incomplete frame, wait for more data
+
+            // Extract frame body between boundaries
+            final frameSection = buffer.sublist(boundaryIndex, nextBoundary);
+
+            // Find JPEG data (after \r\n\r\n headers)
+            final headerEndIndex = _indexOfBytes(frameSection, headerEnd);
+            if (headerEndIndex > 0) {
+              final jpegStart = headerEndIndex + headerEnd.length;
+              final jpegBytes = frameSection.sublist(jpegStart);
+              if (jpegBytes.length > 100) {
+                // Valid JPEG should be > 100 bytes
+                if (!controller.isClosed) {
+                  controller.add(Uint8List.fromList(jpegBytes));
+                }
+              }
+            }
+
+            // Remove processed data from buffer
+            buffer = buffer.sublist(nextBoundary);
+          }
+        }
+      } catch (e) {
+        debugPrint('[HttpCamera] live view error: $e');
+      } finally {
+        _liveViewRunning = false;
+        _liveViewResponse = null;
+        if (!controller.isClosed) {
+          controller.close();
+        }
+      }
+    }();
+
+    return controller.stream;
   }
 
   @override
   Future<void> stopLiveView() async {
-    // no-op
+    _liveViewRunning = false;
+    final response = _liveViewResponse;
+    _liveViewResponse = null;
+    if (response != null) {
+      try {
+        await response.cancel();
+      } catch (_) {}
+    }
   }
 
-  // ── Capture (unsupported) ──
+  /// Find first occurrence of [needle] in [haystack], starting from [start].
+  static int _indexOfBytes(List<int> haystack, List<int> needle, {int start = 0}) {
+    outer:
+    for (var i = start; i <= haystack.length - needle.length; i++) {
+      for (var j = 0; j < needle.length; j++) {
+        if (haystack[i + j] != needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  // ── Capture ──
 
   @override
-  Future<CaptureResult> capturePhoto({bool flash = false}) {
-    throw UnsupportedError('V821CAM does not support capture — use the camera shutter button');
+  Future<CaptureResult> capturePhoto({bool flash = false}) async {
+    // POST /capture — trigger photo capture
+    final capResponse = await _client
+        .post(Uri.parse('$baseUrl/capture'))
+        .timeout(const Duration(seconds: 5));
+
+    if (capResponse.statusCode != 200) {
+      throw Exception('Capture failed: HTTP ${capResponse.statusCode}');
+    }
+
+    // After capture, fetch the latest photo from list
+    final listResult = await listPhotos(limit: 1);
+    if (listResult.photos.isEmpty) {
+      throw Exception('Capture succeeded but no photo found in list');
+    }
+
+    final photo = listResult.photos.first;
+    final fullImage = await downloadPhotoBytes(photo.id);
+    final thumbnail = photo.thumbnail ?? await getThumbnail(photo.id);
+
+    return CaptureResult(
+      id: photo.id,
+      name: photo.name,
+      sizeBytes: fullImage?.length ?? photo.sizeBytes,
+      timestamp: photo.timestamp,
+      thumbnail: thumbnail ?? fullImage,
+      fullImage: fullImage ?? thumbnail,
+    );
   }
 
   // ── Recording (unsupported) ──

@@ -13,6 +13,7 @@ class CaptureControls extends StatelessWidget {
   final VoidCallback onShutter;
   final VoidCallback onRecord;
   final bool isRecording;
+  final bool enabled;
 
   const CaptureControls({
     super.key,
@@ -20,6 +21,7 @@ class CaptureControls extends StatelessWidget {
     required this.onShutter,
     required this.onRecord,
     this.isRecording = false,
+    this.enabled = true,
   });
 
   @override
@@ -38,12 +40,14 @@ class CaptureControls extends StatelessWidget {
           _ThumbnailButton(image: lastPhoto),
 
           // ── Center: Shutter ──
-          _ShutterButton(onTap: onShutter),
+          _ShutterButton(onTap: onShutter, enabled: enabled),
+          const SizedBox(width: 0),
 
           // ── Right: Record ──
           _RecordButton(
             onTap: onRecord,
             isRecording: isRecording,
+            enabled: enabled,
           ),
         ],
       ),
@@ -84,8 +88,9 @@ class _ThumbnailButton extends StatelessWidget {
 /// White circular shutter button.
 class _ShutterButton extends StatefulWidget {
   final VoidCallback onTap;
+  final bool enabled;
 
-  const _ShutterButton({required this.onTap});
+  const _ShutterButton({required this.onTap, this.enabled = true});
 
   @override
   State<_ShutterButton> createState() => _ShutterButtonState();
@@ -96,25 +101,28 @@ class _ShutterButtonState extends State<_ShutterButton> {
 
   @override
   Widget build(BuildContext context) {
+    final enabled = widget.enabled;
     return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onTap();
-      },
-      onTapCancel: () => setState(() => _pressed = false),
+      onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+      onTapUp: enabled
+          ? (_) {
+              setState(() => _pressed = false);
+              widget.onTap();
+            }
+          : null,
+      onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
         width: 64,
         height: 64,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.white,
+          color: enabled ? Colors.white : const Color(0xFF555555),
           boxShadow: _pressed
               ? []
               : [
                   BoxShadow(
-                    color: Colors.white.withValues(alpha: 0.3),
+                    color: Colors.white.withValues(alpha: enabled ? 0.3 : 0.05),
                     blurRadius: 12,
                     spreadRadius: 1,
                   ),
@@ -128,10 +136,10 @@ class _ShutterButtonState extends State<_ShutterButton> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: const Color(0xFF333333),
+                color: enabled ? const Color(0xFF333333) : const Color(0xFF666666),
                 width: 3,
               ),
-              color: Colors.white,
+              color: enabled ? Colors.white : const Color(0xFF555555),
             ),
           ),
         ),
@@ -144,10 +152,12 @@ class _ShutterButtonState extends State<_ShutterButton> {
 class _RecordButton extends StatefulWidget {
   final VoidCallback onTap;
   final bool isRecording;
+  final bool enabled;
 
   const _RecordButton({
     required this.onTap,
     this.isRecording = false,
+    this.enabled = true,
   });
 
   @override
@@ -159,25 +169,28 @@ class _RecordButtonState extends State<_RecordButton> {
 
   @override
   Widget build(BuildContext context) {
+    final enabled = widget.enabled;
     final bool active = widget.isRecording || _pressed;
 
     return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onTap();
-      },
-      onTapCancel: () => setState(() => _pressed = false),
+      onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+      onTapUp: enabled
+          ? (_) {
+              setState(() => _pressed = false);
+              widget.onTap();
+            }
+          : null,
+      onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
         width: 48,
         height: 48,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: active
-              ? const Color(0xFFD32F2F)
-              : const Color(0xFFC62828),
-          boxShadow: active
+          color: enabled
+              ? (active ? const Color(0xFFD32F2F) : const Color(0xFFC62828))
+              : const Color(0xFF555555),
+          boxShadow: active && enabled
               ? [
                   BoxShadow(
                     color: const Color(0xFFC62828).withValues(alpha: 0.5),

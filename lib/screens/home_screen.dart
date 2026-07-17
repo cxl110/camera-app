@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
 import '../services/http_camera_protocol.dart';
@@ -19,12 +21,178 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  bool _wifiConnected = true; // Prototype: always connected
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  bool _isConnected = false;
+  bool _isVerifying = true;
   bool _isRecording = false;
   String _activeTab = 'CAMERA';
+  String? _cameraModel;
+
+  StreamSubscription<ConnectionStatus>? _connectionSub;
+  StreamSubscription<Uint8List>? _liveViewSub;
+  Uint8List? _liveViewFrame;
 
   CameraProtocol get _protocol => context.read<CameraProtocol>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initConnection();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _connectionSub?.cancel();
+    _stopLiveView();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkConnection();
+    } else if (state == AppLifecycleState.paused) {
+      _stopLiveView();
+    }
+  }
+
+  // ── Connection State Machine ──
+
+  Future<void> _initConnection() async {
+    // Listen for connection status changes
+    _connectionSub = _protocol.connectionStream.listen((status) {
+      if (!mounted) return;
+      setState(() {
+        _isConnected = status.connected;
+        _cameraModel = status.cameraBrand;
+        if (_isConnected) {
+          _isVerifying = false;
+          _startLiveView();
+        } else {
+          _stopLiveView();
+        }
+      });
+    });
+
+    // Initial check
+    await _checkConnection();
+  }
+
+  Future<void> _checkConnection() async {
+    setState(() => _isVerifying = true);
+
+    try {
+      final status = await _protocol.getConnectionStatus();
+      if (!mounted) return;
+      setState(() {
+        _isConnected = status.connected;
+        _cameraModel = status.cameraBrand;
+        _isVerifying = false;
+      });
+
+      if (status.connected) {
+        _startLiveView();
+      } else if (_isVerifying) {
+        _showWiFiGuide();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isConnected = false;
+        _isVerifying = false;
+      });
+      _showWiFiGuide();
+    }
+  }
+
+  void _showWiFiGuide() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Row(
+          children: [
+            Icon(Icons.wifi_find, color: Color(0xFFD89A0F), size: 24),
+            SizedBox(width: 10),
+            Text('连接相机WiFi', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+        content: const Text(
+          '请先在系统设置中连接相机WiFi热点：\n\n'
+          'SSID: V821CAM\n密码: 12345678\n\n'
+          '连接成功后返回APP即可自动识别。',
+          style: TextStyle(color: Colors.white60, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Open system WiFi settings
+              try {
+                const MethodChannel('com.cameraapp/system')
+                    .invokeMethod('openWiFiSettings');
+              } catch (_) {}
+            },
+            child: const Text('打开设置', style: TextStyle(color: Color(0xFFD89A0F))),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _checkConnection();
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2D5BD8),
+            ),
+            child: const Text('已连接，重新检测'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Live View ──
+
+  void _startLiveView() {
+    _stopLiveView();
+
+    try {
+      final stream = _protocol.startLiveView();
+      _liveViewSub = stream.listen(
+        (frame) {
+          if (mounted) {
+            setState(() => _liveViewFrame = frame);
+          }
+        },
+        onError: (e) {
+          debugPrint('[HomeScreen] live view error: $e');
+          // Reconnect on error after delay
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted && _isConnected) _startLiveView();
+          });
+        },
+        onDone: () {
+          debugPrint('[HomeScreen] live view ended');
+        },
+      );
+    } catch (e) {
+      debugPrint('[HomeScreen] failed to start live view: $e');
+    }
+  }
+
+  void _stopLiveView() {
+    _liveViewSub?.cancel();
+    _liveViewSub = null;
+    _liveViewFrame = null;
+    try {
+      _protocol.stopLiveView();
+    } catch (_) {}
+  }
+
+  // ── UI ──
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +203,12 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _buildTopBar(),
             Expanded(
-              child: CameraPreview(isConnected: _wifiConnected),
+              child: CameraPreview(
+                isConnected: _isConnected,
+                liveView: _liveViewFrame != null
+                    ? Image.memory(_liveViewFrame!, fit: BoxFit.cover)
+                    : null,
+              ),
             ),
             Selector<ImageService, Uint8List?>(
               selector: (_, service) => service.currentPhoto,
@@ -44,6 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onShutter: _onShutterPressed,
                 onRecord: _onRecordPressed,
                 isRecording: _isRecording,
+                enabled: _isConnected,
               ),
             ),
             const SizedBox(height: 24),
@@ -67,23 +241,29 @@ class _HomeScreenState extends State<HomeScreen> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('已连接 DIY-CAM-001'),
-                  backgroundColor: Color(0xFF1A1A2E),
-                  duration: Duration(seconds: 1),
-                ),
-              );
+              if (_isConnected) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('已连接 $_cameraModel'),
+                    backgroundColor: const Color(0xFF1A1A2E),
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              } else if (_isVerifying) {
+                _checkConnection();
+              } else {
+                _showWiFiGuide();
+              }
             },
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                WifiIndicator(isConnected: _wifiConnected),
+                WifiIndicator(isConnected: _isConnected),
                 const SizedBox(width: 6),
                 Text(
-                  _wifiConnected ? '已连接' : '未连接',
+                  _isConnected ? '已连接' : (_isVerifying ? '检测中...' : '未连接'),
                   style: TextStyle(
-                    color: _wifiConnected
+                    color: _isConnected
                         ? const Color(0xFF4CAF50)
                         : const Color(0xFFF44336),
                     fontSize: 11,
@@ -95,10 +275,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const Spacer(),
           IconButton(
-            onPressed: _onOpenGallery,
+            onPressed: _isConnected ? _onOpenGallery : null,
             icon: Icon(
               Icons.folder_outlined,
-              color: Colors.white.withValues(alpha: 0.7),
+              color: Colors.white.withValues(alpha: _isConnected ? 0.7 : 0.2),
               size: 22,
             ),
             tooltip: '相机照片',
@@ -109,6 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onOpenGallery() async {
+    if (!_isConnected) return;
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -170,6 +351,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onShutterPressed() async {
+    if (!_isConnected) return;
     try {
       final result = await _protocol.capturePhoto();
       if (!mounted) return;
@@ -200,6 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onRecordPressed() async {
+    if (!_isConnected) return;
     if (_isRecording) {
       try {
         final result = await _protocol.stopRecording();
@@ -236,18 +419,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onTabChanged(String tab) {
     if (tab == 'EFFECTS') {
-      _navigateTo(EffectsScreen(wifiConnected: _wifiConnected));
+      _stopLiveView();
+      _navigateTo(EffectsScreen(wifiConnected: _isConnected)).then((_) {
+        if (_isConnected) _startLiveView();
+      });
       return;
     }
     if (tab == 'BORDERS') {
-      _navigateTo(BordersScreen(wifiConnected: _wifiConnected));
+      _stopLiveView();
+      _navigateTo(BordersScreen(wifiConnected: _isConnected)).then((_) {
+        if (_isConnected) _startLiveView();
+      });
       return;
     }
     setState(() => _activeTab = tab);
   }
 
-  void _navigateTo(Widget page) {
-    Navigator.push(
+  Future<void> _navigateTo(Widget page) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => page),
     );
