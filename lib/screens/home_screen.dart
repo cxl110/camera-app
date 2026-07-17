@@ -28,8 +28,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _cameraModel;
 
   StreamSubscription<ConnectionStatus>? _connectionSub;
-  StreamSubscription<Uint8List>? _liveViewSub;
-  Uint8List? _liveViewFrame;
+  Stream<Uint8List>? _liveViewStream;
 
   CameraProtocol get _protocol => context.read<CameraProtocol>();
 
@@ -159,16 +158,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _stopLiveView();
 
     try {
-      final stream = _protocol.startLiveView();
-      _liveViewSub = stream.listen(
-        (frame) {
-          if (mounted) {
-            setState(() => _liveViewFrame = frame);
-          }
-        },
+      _liveViewStream = _protocol.startLiveView();
+      // Reconnect on error after delay
+      _liveViewStream!.listen(
+        null,
         onError: (e) {
           debugPrint('[HomeScreen] live view error: $e');
-          // Reconnect on error after delay
           Future.delayed(const Duration(seconds: 3), () {
             if (mounted && _isConnected) _startLiveView();
           });
@@ -183,9 +178,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _stopLiveView() {
-    _liveViewSub?.cancel();
-    _liveViewSub = null;
-    _liveViewFrame = null;
+    _liveViewStream = null;
     try {
       _protocol.stopLiveView();
     } catch (_) {}
@@ -204,9 +197,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Expanded(
               child: CameraPreview(
                 isConnected: _isConnected,
-                liveView: _liveViewFrame != null
-                    ? Image.memory(_liveViewFrame!, fit: BoxFit.cover)
-                    : null,
+                frameStream: _liveViewStream,
               ),
             ),
             Selector<ImageService, Uint8List?>(

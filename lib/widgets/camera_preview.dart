@@ -1,28 +1,61 @@
+import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 /// Camera live preview or disconnected placeholder.
 ///
-/// Connected: Shows the camera feed (yellow mockup for design phase).
+/// Connected with stream: Renders MJPEG frames via StreamBuilder (only
+/// rebuilds the image widget, not the parent tree).
 /// Disconnected: Black background with a simple camera icon in white outline.
 class CameraPreview extends StatelessWidget {
   final bool isConnected;
   final Widget? liveView;
+  final Stream<Uint8List>? frameStream;
 
   const CameraPreview({
     super.key,
     this.isConnected = false,
     this.liveView,
+    this.frameStream,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: isConnected ? const Color(0xFFD89A0F) : const Color(0xFF000000),
-      child: isConnected
-          ? (liveView ?? _buildConnectedPlaceholder())
-          : _buildDisconnectedPlaceholder(),
+      color: isConnected ? Colors.black : const Color(0xFF000000),
+      child: _buildContent(),
     );
+  }
+
+  Widget _buildContent() {
+    if (!isConnected) {
+      return _buildDisconnectedPlaceholder();
+    }
+
+    // Use injected liveView widget if provided (takes priority)
+    if (liveView != null) {
+      return liveView!;
+    }
+
+    // Use MJPEG frame stream — only rebuilds the image, not the parent
+    if (frameStream != null) {
+      return StreamBuilder<Uint8List>(
+        stream: frameStream,
+        builder: (ctx, snapshot) {
+          if (snapshot.hasData && snapshot.data != null) {
+            return Image.memory(
+              snapshot.data!,
+              fit: BoxFit.contain,
+              gaplessPlayback: true, // smooth frame transitions
+            );
+          }
+          return _buildConnectedPlaceholder();
+        },
+      );
+    }
+
+    return _buildConnectedPlaceholder();
   }
 
   /// Placeholder when camera is connected but no live feed available.
@@ -48,7 +81,6 @@ class CameraPreview extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Simple camera outline icon (black & white)
           CustomPaint(
             size: const Size(64, 48),
             painter: _CameraOutlinePainter(),
@@ -88,19 +120,16 @@ class _CameraOutlinePainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    // Camera body (rounded rectangle)
     final bodyRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(4, h * 0.25, w * 0.85, h * 0.7),
       const Radius.circular(6),
     );
     canvas.drawRRect(bodyRect, paint);
 
-    // Lens (circle in center)
     final lensCenter = Offset(w * 0.45, h * 0.58);
     canvas.drawCircle(lensCenter, w * 0.16, paint);
     canvas.drawCircle(lensCenter, w * 0.07, paint);
 
-    // Flash bump (top-right)
     final path = Path()
       ..moveTo(w * 0.60, h * 0.25)
       ..lineTo(w * 0.60, h * 0.1)
