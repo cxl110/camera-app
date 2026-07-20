@@ -561,10 +561,19 @@ class _EffectsScreenState extends State<EffectsScreen> {
     _startSpinner();
     debugPrint('[Effects] applying filter: $preset on ${source.length} bytes');
 
+    // Force minimum spinner display time so user can see it
+    final spinnerStart = DateTime.now();
+
     // Process neural inference in background
     FilterProcessor.apply(source, preset).then((filtered) {
       if (!mounted) return;
-      _stopSpinner();
+      // Ensure spinner shows for at least 600ms
+      final elapsed = DateTime.now().difference(spinnerStart).inMilliseconds;
+      final delay = elapsed < 600 ? 600 - elapsed : 0;
+      Future.delayed(Duration(milliseconds: delay), () {
+        if (!mounted) return;
+        _stopSpinner();
+      });
       debugPrint('[Effects] filter result: ${filtered.length} bytes');
       _baseFilteredImage = filtered;
       _applyPostEffects();

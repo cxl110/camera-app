@@ -425,24 +425,26 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     continue
                 }
 
-                // Output crop: skip the scaled padding on left/top, keep content area
+                // Output crop: content area inside the upscaled tile
+                // Model output is (patchSize+2*padding)*outputScale wide,
+                // but only the inner patchSize*outputScale region is valid content.
                 let outCropX = padL * outputScale
                 let outCropY = padT * outputScale
-                let outContentW = cropW * outputScale
-                let outContentH = cropH * outputScale
+                let outCropW = min(outPatchSize, cropW * outputScale)
+                let outCropH = min(outPatchSize, cropH * outputScale)
 
                 guard let croppedCGImage = filteredPatch.cgImage?.cropping(to: CGRect(
                     x: outCropX, y: outCropY,
-                    width: outContentW, height: outContentH
+                    width: outCropW, height: outCropH
                 )) else {
                     continue
                 }
 
-                let destX = col * outPatchSize + outCropX
-                let destY = row * outPatchSize + outCropY
+                let destX = col * outPatchSize
+                let destY = row * outPatchSize
                 let destRect = CGRect(
                     x: destX, y: destY,
-                    width: outContentW, height: outContentH
+                    width: outCropW, height: outCropH
                 )
 
                 // Draw into output context

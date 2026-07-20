@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import '../services/camera_protocol.dart';
 import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/coreml_bridge.dart';
+import '../services/app_log.dart';
 
 /// iOS-style photo gallery browser.
 ///
@@ -265,6 +269,26 @@ class _GalleryScreenState extends State<GalleryScreen> {
     );
   }
 
+  Future<void> _exportLogs() async {
+    try {
+      final logText = await AppLog.readAllLogs();
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/logs_export.txt');
+      await file.writeAsString(logText);
+      // Save to gallery so user can find it in Files app
+      await ImageGallerySaver.saveFile(file.path, name: 'camera_app_logs.txt');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('日志已导出到文件'), backgroundColor: Color(0xFF2E7D32)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   bool _isAllBlack(Uint8List bytes) {
     try {
       // Quick check: sample first 1000 pixels
@@ -313,6 +337,11 @@ class _GalleryScreenState extends State<GalleryScreen> {
           TextButton(
             onPressed: _photos.isNotEmpty ? _enterSelectMode : null,
             child: const Text('选择', style: TextStyle(color: Color(0xFFD89A0F), fontSize: 14)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
+            onPressed: _exportLogs,
+            tooltip: '导出日志',
           ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white54, size: 22),

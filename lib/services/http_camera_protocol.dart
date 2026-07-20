@@ -323,8 +323,8 @@ class HttpCameraProtocol extends CameraProtocol {
         photos: photos,
       );
     } catch (e) {
+      AppLog.error('HttpCam', 'listPhotos error', e);
       debugPrint('[HttpCamera] listPhotos error: $e');
-      _emitStatus(const ConnectionStatus(connected: false));
       return const PhotoListResult(total: 0, offset: 0, limit: 0, photos: []);
     }
   }
@@ -380,8 +380,8 @@ class HttpCameraProtocol extends CameraProtocol {
       // Note: fullImage is not stored here — callers should use the streamed bytes.
       // The CameraPhoto.fullImage field is set by the caller if needed.
     } catch (e) {
+      AppLog.error('HttpCam', 'downloadPhoto error', e);
       debugPrint('[HttpCamera] downloadPhoto error: $e');
-      _emitStatus(const ConnectionStatus(connected: false));
       rethrow;
     }
   }
