@@ -9,6 +9,7 @@ import 'services/http_camera_protocol.dart';
 import 'services/neural_filter_client.dart';
 import 'services/filter_processor.dart';
 import 'services/image_service.dart';
+import 'services/app_log.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +30,7 @@ void main() async {
   );
 
   // Initialize services — non-blocking to avoid startup hang
+  AppLog.init().catchError((_) {});
   final filterService = FilterService();
   filterService.initialize().catchError((_) {});
 

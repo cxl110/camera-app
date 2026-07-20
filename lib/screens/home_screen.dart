@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
 import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
+import '../services/app_log.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
@@ -69,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _isConnected = status.connected;
         _cameraModel = status.cameraBrand;
         if (_isConnected) {
+          AppLog.info('Home', 'Camera connected: $_cameraModel');
           _isVerifying = false;
           _startLiveView();
           _syncTimeIfNeeded();
@@ -167,6 +169,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _startLiveView() {
     _stopLiveView();
+    AppLog.info('Home', 'Starting live view...');
 
     try {
       _liveViewStream = _protocol.startLiveView();

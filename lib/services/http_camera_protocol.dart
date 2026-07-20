@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'camera_protocol.dart';
+import 'app_log.dart';
 
 /// ZIVIGo HTTP protocol implementation.
 ///
@@ -50,6 +51,7 @@ class HttpCameraProtocol extends CameraProtocol {
 
         // Only ZIVIGo devices are supported
         if (model == 'ZIVIGo') {
+          AppLog.info('HttpCam', 'Connected to ZIVIGo fw=$fw ssid=$ssid');
           final status = ConnectionStatus(
             connected: true,
             ssid: ssid,
@@ -66,6 +68,7 @@ class HttpCameraProtocol extends CameraProtocol {
     }
 
     final status = const ConnectionStatus(connected: false);
+    AppLog.debug('HttpCam', 'Connection check failed — not connected');
     _emitStatus(status);
     return status;
   }
@@ -85,7 +88,9 @@ class HttpCameraProtocol extends CameraProtocol {
       throw StateError('Live view is already running');
     }
 
+    AppLog.info('HttpCam', 'Starting MJPEG live view stream...');
     final controller = StreamController<Uint8List>();
+    var frameCount = 0;
 
     _liveViewRunning = true;
 
@@ -137,6 +142,10 @@ class HttpCameraProtocol extends CameraProtocol {
               final jpegStart = headerEndIndex + headerEnd.length;
               final jpegBytes = frameSection.sublist(jpegStart);
               if (jpegBytes.length > 100) {
+                frameCount++;
+                if (frameCount == 1) {
+                  AppLog.info('HttpCam', 'First MJPEG frame received (${jpegBytes.length} bytes)');
+                }
                 // Valid JPEG should be > 100 bytes
                 if (!controller.isClosed) {
                   controller.add(Uint8List.fromList(jpegBytes));
@@ -149,6 +158,7 @@ class HttpCameraProtocol extends CameraProtocol {
           }
         }
       } catch (e) {
+        AppLog.error('HttpCam', 'Live view error after $frameCount frames', e);
         debugPrint('[HttpCamera] live view error: $e');
       } finally {
         _liveViewRunning = false;
