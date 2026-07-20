@@ -425,22 +425,24 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     continue
                 }
 
-                // Output crop: skip the scaled padding on left/top
+                // Output crop: skip the scaled padding on left/top, keep content area
                 let outCropX = padL * outputScale
                 let outCropY = padT * outputScale
+                let outContentW = cropW * outputScale
+                let outContentH = cropH * outputScale
 
                 guard let croppedCGImage = filteredPatch.cgImage?.cropping(to: CGRect(
                     x: outCropX, y: outCropY,
-                    width: outPatchSize, height: outPatchSize
+                    width: outContentW, height: outContentH
                 )) else {
                     continue
                 }
 
-                let destX = col * outPatchSize
-                let destY = row * outPatchSize
+                let destX = col * outPatchSize + outCropX
+                let destY = row * outPatchSize + outCropY
                 let destRect = CGRect(
                     x: destX, y: destY,
-                    width: outPatchSize, height: outPatchSize
+                    width: outContentW, height: outContentH
                 )
 
                 // Draw into output context
