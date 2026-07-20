@@ -50,7 +50,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _checkConnection();
+      // Only re-check connection if we were previously connected.
+      // Don't show WiFi guide on resume — just silently retry.
+      _retryConnection();
     } else if (state == AppLifecycleState.paused) {
       _stopLiveView();
     }
@@ -75,33 +77,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     // Initial check
-    await _checkConnection();
+    await _retryConnection();
+    // If still not connected after initial check, show WiFi guide
+    if (!mounted) return;
+    if (!_isConnected) {
+      _showWiFiGuide();
+    }
   }
 
-  Future<void> _checkConnection() async {
-    setState(() => _isVerifying = true);
-
+  Future<void> _retryConnection() async {
     try {
       final status = await _protocol.getConnectionStatus();
       if (!mounted) return;
+      final wasConnected = _isConnected;
       setState(() {
         _isConnected = status.connected;
         _cameraModel = status.cameraBrand;
         _isVerifying = false;
       });
-
-      if (status.connected) {
+      if (status.connected && !wasConnected) {
         _startLiveView();
-      } else if (_isVerifying) {
-        _showWiFiGuide();
       }
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _isConnected = false;
-        _isVerifying = false;
-      });
-      _showWiFiGuide();
+      // Silent retry — don't show WiFi guide on resume
     }
   }
 
@@ -140,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _checkConnection();
+              _retryConnection();
             },
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF2D5BD8),
@@ -238,7 +236,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 );
               } else if (_isVerifying) {
-                _checkConnection();
+                _retryConnection();
               } else {
                 _showWiFiGuide();
               }

@@ -219,7 +219,14 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
             }
         }
 
-        let model = try MLModel(contentsOf: modelURL!)
+        let config = MLModelConfiguration()
+        config.computeUnits = .cpuAndGPU
+        // Use .all for Neural Engine when available (A12+)
+        if #available(iOS 14.0, *) {
+            // Prefer GPU + Neural Engine; fall back to CPU if unsupported ops
+            config.computeUnits = .all
+        }
+        let model = try MLModel(contentsOf: modelURL!, configuration: config)
         modelCache[modelName] = model
         return model
     }
