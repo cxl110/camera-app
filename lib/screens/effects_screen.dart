@@ -647,7 +647,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
     _spinnerTimer?.cancel();
     _spinnerIndex = 0;
     _showSpinner = true;
-    _spinnerTimer = Timer.periodic(const Duration(milliseconds: 80), (t) {
+    _spinnerTimer = Timer.periodic(const Duration(milliseconds: 2000), (t) {
       if (!mounted) { t.cancel(); return; }
       setState(() => _spinnerIndex = (_spinnerIndex + 1) % _spinnerVerbs.length);
     });
