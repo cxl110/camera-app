@@ -70,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (_isConnected) {
           _isVerifying = false;
           _startLiveView();
+          _syncTimeIfNeeded();
         } else {
           _stopLiveView();
         }
@@ -97,9 +98,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       if (status.connected && !wasConnected) {
         _startLiveView();
+        _syncTimeIfNeeded();
       }
     } catch (_) {
       // Silent retry — don't show WiFi guide on resume
+    }
+  }
+
+  bool _timeSynced = false;
+
+  void _syncTimeIfNeeded() {
+    if (_timeSynced) return;
+    _timeSynced = true;
+    if (_protocol is HttpCameraProtocol) {
+      (_protocol as HttpCameraProtocol).syncRtc();
     }
   }
 
@@ -119,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
         content: const Text(
           '请先在系统设置中连接相机WiFi热点：\n\n'
-          'SSID: V821CAM\n密码: 12345678\n\n'
+          'SSID: ZIVIGo\n密码: zivi2025\n\n'
           '连接成功后返回APP即可自动识别。',
           style: TextStyle(color: Colors.white60, fontSize: 14, height: 1.5),
         ),
@@ -284,8 +296,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_isConnected) _startLiveView();
   }
 
+  DateTime _lastCaptureTime = DateTime(2000);
+
   void _onShutterPressed() async {
     if (!_isConnected) return;
+
+    // 1-second cooldown to prevent burst capture
+    final now = DateTime.now();
+    if (now.difference(_lastCaptureTime).inMilliseconds < 1000) return;
+    _lastCaptureTime = now;
     try {
       final result = await _protocol.capturePhoto();
       if (!mounted) return;

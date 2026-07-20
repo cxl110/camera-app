@@ -6,11 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'camera_protocol.dart';
 
-/// V821CAM HTTP protocol implementation.
+/// ZIVIGo HTTP protocol implementation.
 ///
-/// Communicates with the DIY camera dev board over WiFi.
+/// Communicates with the ZIVIGo camera dev board over WiFi.
 /// Provides live view (MJPEG stream), photo capture, file listing,
-/// download, thumbnail, and delete.
+/// download, thumbnail, delete, and RTC time sync.
 ///
 /// Spec: C:\H3\APP\HTTPAPI\V821CAM-HTTP-API.md
 class HttpCameraProtocol extends CameraProtocol {
@@ -46,10 +46,10 @@ class HttpCameraProtocol extends CameraProtocol {
         final info = jsonDecode(response.body) as Map<String, dynamic>;
         final model = info['model'] as String? ?? '';
         final fw = info['fw'] as String? ?? '';
-        final ssid = info['ssid'] as String? ?? 'V821CAM';
+        final ssid = info['ssid'] as String? ?? 'ZIVIGo';
 
-        // Only V821 devices are supported
-        if (model == 'V821') {
+        // Only ZIVIGo devices are supported
+        if (model == 'ZIVIGo') {
           final status = ConnectionStatus(
             connected: true,
             ssid: ssid,
@@ -218,12 +218,29 @@ class HttpCameraProtocol extends CameraProtocol {
 
   @override
   Future<void> startRecording() {
-    throw UnsupportedError('V821CAM does not support recording');
+    throw UnsupportedError('ZIVIGo does not support recording');
   }
 
   @override
   Future<CaptureResult> stopRecording() {
-    throw UnsupportedError('V821CAM does not support recording');
+    throw UnsupportedError('ZIVIGo does not support recording');
+  }
+
+  // ── RTC Time Sync ──
+
+  /// Sync phone time to camera RTC. Called on every connection.
+  /// Fails silently — non-critical operation.
+  Future<void> syncRtc() async {
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      await _client.post(
+        Uri.parse('$baseUrl/rtc'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'timestamp': now}),
+      ).timeout(const Duration(seconds: 3));
+    } catch (_) {
+      // Silently ignore — RTC sync is best-effort
+    }
   }
 
   // ── Storage ──
