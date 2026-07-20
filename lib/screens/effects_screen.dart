@@ -49,6 +49,52 @@ class _EffectsScreenState extends State<EffectsScreen> {
   bool _isProcessing = false;
   bool _isSaving = false;
 
+  // Claude-style reasoning spinner
+  Timer? _spinnerTimer;
+  int _spinnerIndex = 0;
+  bool _showSpinner = false;
+
+  static const _spinnerVerbs = [
+    'Accomplishing', 'Actioning', 'Actualizing', 'Architecting', 'Baking',
+    'Beaming', "Beboppin'", 'Befuddling', 'Billowing', 'Blanching',
+    'Bloviating', 'Boogieing', 'Boondoggling', 'Booping', 'Bootstrapping',
+    'Brewing', 'Bunning', 'Burrowing', 'Calculating', 'Canoodling',
+    'Caramelizing', 'Cascading', 'Catapulting', 'Cerebrating', 'Channeling',
+    'Channelling', 'Choreographing', 'Churning', 'Clauding', 'Coalescing',
+    'Cogitating', 'Combobulating', 'Composing', 'Computing', 'Concocting',
+    'Considering', 'Contemplating', 'Cooking', 'Crafting', 'Creating',
+    'Crunching', 'Crystallizing', 'Cultivating', 'Deciphering', 'Deliberating',
+    'Determining', 'Dilly-dallying', 'Discombobulating', 'Doing', 'Doodling',
+    'Drizzling', 'Ebbing', 'Effecting', 'Elucidating', 'Embellishing',
+    'Enchanting', 'Envisioning', 'Evaporating', 'Fermenting', 'Fiddle-faddling',
+    'Finagling', 'Flambéing', 'Flibbertigibbeting', 'Flowing', 'Flummoxing',
+    'Fluttering', 'Forging', 'Forming', 'Frolicking', 'Frosting',
+    'Gallivanting', 'Galloping', 'Garnishing', 'Generating', 'Gesticulating',
+    'Germinating', 'Gitifying', 'Grooving', 'Gusting', 'Harmonizing',
+    'Hashing', 'Hatching', 'Herding', 'Honking', 'Hullaballooing',
+    'Hyperspacing', 'Ideating', 'Imagining', 'Improvising', 'Incubating',
+    'Inferring', 'Infusing', 'Ionizing', 'Jitterbugging', 'Julienning',
+    'Kneading', 'Leavening', 'Levitating', 'Lollygagging', 'Manifesting',
+    'Marinating', 'Meandering', 'Metamorphosing', 'Misting', 'Moonwalking',
+    'Moseying', 'Mulling', 'Mustering', 'Musing', 'Nebulizing', 'Nesting',
+    'Newspapering', 'Noodling', 'Nucleating', 'Orbiting', 'Orchestrating',
+    'Osmosing', 'Perambulating', 'Percolating', 'Perusing', 'Philosophising',
+    'Photosynthesizing', 'Pollinating', 'Pondering', 'Pontificating',
+    'Pouncing', 'Precipitating', 'Prestidigitating', 'Processing', 'Proofing',
+    'Propagating', 'Puttering', 'Puzzling', 'Quantumizing', 'Razzle-dazzling',
+    'Razzmatazzing', 'Recombobulating', 'Reticulating', 'Roosting',
+    'Ruminating', 'Sautéing', 'Scampering', 'Schlepping', 'Scurrying',
+    'Seasoning', 'Shenaniganing', 'Shimmying', 'Simmering', 'Skedaddling',
+    'Sketching', 'Slithering', 'Smooshing', 'Sock-hopping', 'Spelunking',
+    'Spinning', 'Sprouting', 'Stewing', 'Sublimating', 'Swirling', 'Swooping',
+    'Symbioting', 'Synthesizing', 'Tempering', 'Thinking', 'Thundering',
+    'Tinkering', 'Tomfoolering', 'Topsy-turvying', 'Transfiguring',
+    'Transmuting', 'Twisting', 'Undulating', 'Unfurling', 'Unravelling',
+    'Vibing', 'Waddling', 'Wandering', 'Warping', 'Whatchamacalliting',
+    'Whirlpooling', 'Whirring', 'Whisking', 'Wibbling', 'Working',
+    'Wrangling', 'Zesting', 'Zigzagging',
+  ];
+
   // Film presets
   String _selectedPreset = 'NONE';
 
@@ -348,6 +394,50 @@ class _EffectsScreenState extends State<EffectsScreen> {
                 ),
               ),
             ),
+
+          // ── Claude-style reasoning spinner (bottom-left) ──
+          if (_showSpinner)
+            Positioned(
+              bottom: 10,
+              left: 10,
+              child: _buildSpinnerLabel(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpinnerLabel() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 12, height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD89A0F)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _spinnerVerbs[_spinnerIndex],
+            style: const TextStyle(
+              color: Color(0xFFD89A0F),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          const Text(
+            '…',
+            style: TextStyle(color: Color(0xFFD89A0F), fontSize: 12),
+          ),
         ],
       ),
     );
@@ -468,16 +558,18 @@ class _EffectsScreenState extends State<EffectsScreen> {
       return;
     }
 
+    _startSpinner();
     debugPrint('[Effects] applying filter: $preset on ${source.length} bytes');
 
     // Process neural inference in background
     FilterProcessor.apply(source, preset).then((filtered) {
       if (!mounted) return;
+      _stopSpinner();
       debugPrint('[Effects] filter result: ${filtered.length} bytes');
       _baseFilteredImage = filtered;
-      // Apply grain/leak on top
       _applyPostEffects();
     }).catchError((e) {
+      _stopSpinner();
       debugPrint('[Effects] filter error: $e');
     });
   }
@@ -551,9 +643,27 @@ class _EffectsScreenState extends State<EffectsScreen> {
     );
   }
 
+  void _startSpinner() {
+    _spinnerTimer?.cancel();
+    _spinnerIndex = 0;
+    _showSpinner = true;
+    _spinnerTimer = Timer.periodic(const Duration(milliseconds: 80), (t) {
+      if (!mounted) { t.cancel(); return; }
+      setState(() => _spinnerIndex = (_spinnerIndex + 1) % _spinnerVerbs.length);
+    });
+  }
+
+  void _stopSpinner() {
+    _spinnerTimer?.cancel();
+    if (mounted) {
+      setState(() => _showSpinner = false);
+    }
+  }
+
   @override
   void dispose() {
     _postEffectTimer?.cancel();
+    _spinnerTimer?.cancel();
     super.dispose();
   }
 }
