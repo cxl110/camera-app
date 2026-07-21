@@ -1,11 +1,9 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/camera_protocol.dart';
-import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/neural_filter_client.dart';
 import '../widgets/bottom_tabs.dart';
+import 'gallery_screen.dart';
 
 /// BORDERS page — select film frame overlay and adjust thickness.
 class BordersScreen extends StatefulWidget {
@@ -146,10 +144,10 @@ class _BordersScreenState extends State<BordersScreen> {
             tooltip: '保存',
           ),
           IconButton(
-            icon: Icon(Icons.add_photo_alternate_outlined,
+            icon: Icon(Icons.folder_outlined,
                 color: Colors.white.withValues(alpha: 0.7), size: 22),
-            onPressed: _onSelectImage,
-            tooltip: '选择图片',
+            onPressed: _onOpenAlbum,
+            tooltip: '相册',
           ),
         ],
       ),
@@ -332,33 +330,12 @@ class _BordersScreenState extends State<BordersScreen> {
     );
   }
 
-  void _onSelectImage() async {
-    final protocol = context.read<CameraProtocol>();
-    final imageService = context.read<ImageService>();
-    try {
-      final result = await protocol.listPhotos(limit: 20);
-      if (!mounted) return;
-      if (result.photos.isNotEmpty) {
-        final first = result.photos.first;
-        Uint8List? bytes = first.fullImage;
-
-        // Download full image if protocol doesn't preload it
-        if (bytes == null && protocol is HttpCameraProtocol) {
-          bytes = await (protocol as HttpCameraProtocol).downloadPhotoBytes(first.id);
-        }
-
-        bytes ??= first.thumbnail;
-
-        if (bytes != null) {
-          imageService.loadPhoto(bytes, name: first.name);
-        }
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('加载失败: $e'), backgroundColor: Colors.red),
-      );
-    }
+  void _onOpenAlbum() async {
+    // 与 EFFECTS 页一致：跳转相册浏览页，而不是直接加载第一张照片。
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GalleryScreen()),
+    );
   }
 
   void _onSave() async {

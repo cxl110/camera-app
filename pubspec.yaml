@@ -33,6 +33,9 @@ dependencies:
   # Gallery save (system photo library)
   image_gallery_saver: ^2.0.3
 
+  # Sharing logs / files via system share sheet
+  share_plus: ^10.1.4
+
   # CoreML inference is handled via native platform channel (ios/Runner/CoreMLPlugin.swift)
 
   # Permissions

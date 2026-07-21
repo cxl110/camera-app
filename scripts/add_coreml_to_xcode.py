@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-"""Add CoreMLPlugin.swift to Xcode project so it gets compiled.
+"""Add custom Swift files to Xcode project so they get compiled.
 
 This script modifies project.pbxproj by inserting new entries at
 specific positions without modifying existing lines.
+
+Supported files:
+  - CoreMLPlugin.swift
+  - VideoTranscoder.swift
 """
 
 import os
 import uuid
 import sys
 
+SWIFT_FILES = ['CoreMLPlugin.swift', 'VideoTranscoder.swift']
 
-def main():
-    proj_path = 'ios/Runner.xcodeproj/project.pbxproj'
 
-    if not os.path.exists(proj_path):
-        print(f"ERROR: {proj_path} not found", file=sys.stderr)
-        sys.exit(1)
+def add_swift_file(proj_path, filename):
+    """Add a single Swift file to the Xcode project if not already present."""
 
     with open(proj_path, 'r') as f:
         lines = f.readlines()
 
     # Check if already added
-    if any('CoreMLPlugin.swift' in line for line in lines):
-        print('CoreMLPlugin.swift already in Xcode project')
+    if any(filename in line for line in lines):
+        print(f'{filename} already in Xcode project')
         return
 
     file_ref_id = uuid.uuid4().hex[:24].upper()
@@ -31,9 +33,6 @@ def main():
     new_lines = []
     in_pbxbuildfile = False
     in_pbxfileref = False
-    in_group = False
-    in_sources = False
-    in_xcbuildconfig = False
 
     for i, line in enumerate(lines):
         # Track which section we're in
@@ -51,38 +50,49 @@ def main():
         # Step 1: Add to PBXFileReference section (after Runner-Bridging-Header.h entry)
         if in_pbxfileref and 'Runner-Bridging-Header.h' in line:
             file_ref_entry = (
-                f'\t\t{file_ref_id} /* CoreMLPlugin.swift */ = '
+                f'\t\t{file_ref_id} /* {filename} */ = '
                 f'{{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; '
-                f'path = CoreMLPlugin.swift; sourceTree = "<group>"; }};\n'
+                f'path = {filename}; sourceTree = "<group>"; }};\n'
             )
             new_lines.append(file_ref_entry)
 
         # Step 2: Add to PBXBuildFile section (after AppDelegate.swift in Sources entry)
         if in_pbxbuildfile and 'AppDelegate.swift' in line and 'PBXBuildFile' in line:
             build_file_entry = (
-                f'\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */ = '
-                f'{{isa = PBXBuildFile; fileRef = {file_ref_id} /* CoreMLPlugin.swift */; }};\n'
+                f'\t\t{build_file_id} /* {filename} in Sources */ = '
+                f'{{isa = PBXBuildFile; fileRef = {file_ref_id} /* {filename} */; }};\n'
             )
             new_lines.append(build_file_entry)
 
         # Step 3: Add file ref to Runner group children
         # After the line ending with 'Runner-Bridging-Header.h */,' (group children entry)
         if line.strip().endswith('/* Runner-Bridging-Header.h */,'):
-            group_entry = f'\t\t\t\t{file_ref_id} /* CoreMLPlugin.swift */,\n'
+            group_entry = f'\t\t\t\t{file_ref_id} /* {filename} */,\n'
             new_lines.append(group_entry)
 
         # Step 4: Add build file to PBXSourcesBuildPhase
         # After the line ending with 'SceneDelegate.swift in Sources */,'
         if line.strip().endswith('/* SceneDelegate.swift in Sources */,'):
-            source_entry = f'\t\t\t\t\t{build_file_id} /* CoreMLPlugin.swift in Sources */,\n'
+            source_entry = f'\t\t\t\t\t{build_file_id} /* {filename} in Sources */,\n'
             new_lines.append(source_entry)
 
     with open(proj_path, 'w') as f:
         f.writelines(new_lines)
 
-    print(f'Added CoreMLPlugin.swift to Xcode project')
+    print(f'Added {filename} to Xcode project')
     print(f'  File ref: {file_ref_id}')
     print(f'  Build file: {build_file_id}')
+
+
+def main():
+    proj_path = 'ios/Runner.xcodeproj/project.pbxproj'
+
+    if not os.path.exists(proj_path):
+        print(f"ERROR: {proj_path} not found", file=sys.stderr)
+        sys.exit(1)
+
+    for filename in SWIFT_FILES:
+        add_swift_file(proj_path, filename)
 
 
 if __name__ == '__main__':

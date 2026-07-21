@@ -4,11 +4,12 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/camera_protocol.dart';
 import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/coreml_bridge.dart';
+import '../services/video_transcoder.dart';
 import '../services/app_log.dart';
 
 /// iOS-style photo gallery browser.
@@ -179,30 +180,42 @@ class _GalleryScreenState extends State<GalleryScreen> {
       });
 
       final photo = selected[i];
+      final isVideo = photo.name.toUpperCase().startsWith('VID_');
 
       try {
-        // Download full image
+        // Download full file (photo or video)
         Uint8List? bytes;
         if (_protocol is HttpCameraProtocol) {
           bytes = await (_protocol as HttpCameraProtocol).downloadPhotoBytes(photo.id);
         }
         if (bytes == null) continue;
 
-        // x2 upscale
-        setState(() => _currentProgress = 0.5);
-        try {
-          final upscaled = await CoreMLBridge.upscalePhoto(imageBytes: bytes);
-          if (upscaled != null && !_isAllBlack(upscaled)) {
-            bytes = upscaled;
+        if (isVideo) {
+          // ── Video: AVI → MP4 transcode + save ──
+          setState(() => _currentProgress = 0.3);
+          final mp4Path = await VideoTranscoder.transcodeAndSave(
+            aviBytes: bytes,
+            name: photo.name,
+          );
+          if (mp4Path == null) {
+            AppLog.error('Gallery', 'Video transcode failed: ${photo.name}');
           }
-        } catch (_) {}
+        } else {
+          // ── Photo: x2 upscale + save ──
+          setState(() => _currentProgress = 0.5);
+          try {
+            final upscaled = await CoreMLBridge.upscalePhoto(imageBytes: bytes);
+            if (upscaled != null && !_isAllBlack(upscaled)) {
+              bytes = upscaled;
+            }
+          } catch (_) {}
 
-        setState(() => _currentProgress = 0.8);
+          setState(() => _currentProgress = 0.8);
 
-        // Save
-        final saveBytes = bytes;
-        if (saveBytes != null) {
-          await imageService.saveWithUpscale(saveBytes, photo.name);
+          final saveBytes = bytes;
+          if (saveBytes != null) {
+            await imageService.saveWithUpscale(saveBytes, photo.name);
+          }
         }
       } catch (_) {
         // Continue with next photo
@@ -220,7 +233,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('已保存 $_downloadTotal 张照片'),
+        content: Text('已保存 $_downloadTotal 项'),
         backgroundColor: const Color(0xFF2E7D32),
       ),
     );
@@ -273,13 +286,26 @@ class _GalleryScreenState extends State<GalleryScreen> {
     try {
       final logText = await AppLog.readAllLogs();
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/logs_export.txt');
+      final fileName = 'camera_app_logs_${DateTime.now().millisecondsSinceEpoch}.txt';
+      final file = File('${dir.path}/$fileName');
       await file.writeAsString(logText);
-      // Save to gallery so user can find it in Files app
-      await ImageGallerySaver.saveFile(file.path, name: 'camera_app_logs.txt');
+
+      // iOS 照片库不会显示 .txt 文件，改用系统分享面板：
+      // 用户可选择「存储到"文件"」、AirDrop、发到聊天等。
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '相机APP日志',
+        text: '相机APP日志导出',
+      );
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('日志已导出到文件'), backgroundColor: Color(0xFF2E7D32)),
+        SnackBar(
+          content: Text('日志文件: $fileName\n'
+              '路径: ${file.path}\n已通过分享面板导出'),
+          backgroundColor: const Color(0xFF2E7D32),
+          duration: const Duration(seconds: 4),
+        ),
       );
     } catch (e) {
       if (!mounted) return;

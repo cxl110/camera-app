@@ -89,7 +89,10 @@ class HttpCameraProtocol extends CameraProtocol {
     }
 
     AppLog.info('HttpCam', 'Starting MJPEG live view stream...');
-    final controller = StreamController<Uint8List>();
+    // Broadcast: HomeScreen listens for errors/done, CameraPreview's
+    // StreamBuilder listens for frames. A single-subscription stream would
+    // let the first listener swallow every frame and leave the preview blank.
+    final controller = StreamController<Uint8List>.broadcast();
     var frameCount = 0;
 
     _liveViewRunning = true;
@@ -106,57 +109,116 @@ class HttpCameraProtocol extends CameraProtocol {
           throw Exception('Live view unavailable: HTTP ${_liveViewResponse!.statusCode}');
         }
 
-        // Parse MJPEG multipart stream
+        AppLog.info('HttpCam',
+            'Live view connected: ${_liveViewResponse!.statusCode}, '
+            'Content-Type=${_liveViewResponse!.headers['content-type']}');
+
+        // Parse MJPEG multipart stream.
+        //
+        // Frame format (per HTTP API v1.3 §5):
+        //   --mjpegstream\r\n
+        //   Content-Type: image/jpeg\r\n
+        //   Content-Length: <n>\r\n
+        //   \r\n
+        //   <n bytes of JPEG>\r\n
+        //
+        // We read by Content-Length rather than scanning for the next
+        // boundary: more robust against boundary-like bytes inside JPEG
+        // data and against boundaries split across chunks.
         const boundary = '--mjpegstream';
         final boundaryBytes = boundary.codeUnits;
         final headerEnd = '\r\n\r\n'.codeUnits;
+        final crlf = '\r\n'.codeUnits;
 
         var buffer = <int>[];
 
         await for (final chunk in _liveViewResponse!.stream) {
           if (!_liveViewRunning) break;
-
           buffer.addAll(chunk);
 
-          // Search for complete frames
-          while (_liveViewRunning && buffer.length > boundaryBytes.length) {
-            // Find boundary start
+          // Try to extract as many complete frames as the buffer holds.
+          while (_liveViewRunning) {
+            // 1. Locate the next boundary.
             final boundaryIndex = _indexOfBytes(buffer, boundaryBytes);
-            if (boundaryIndex < 0) break;
+            if (boundaryIndex < 0) {
+              // No boundary yet — keep only a tail to avoid unbounded growth,
+              // but never trim past where a boundary could still appear.
+              if (buffer.length > boundaryBytes.length) {
+                buffer = buffer.sublist(buffer.length - boundaryBytes.length);
+              }
+              break;
+            }
 
-            // Find next boundary after this one
-            final nextBoundary = _indexOfBytes(
-              buffer,
-              boundaryBytes,
-              start: boundaryIndex + boundaryBytes.length,
-            );
+            // 2. Discard anything before the boundary.
+            var pos = boundaryIndex + boundaryBytes.length;
 
-            if (nextBoundary < 0) break; // incomplete frame, wait for more data
+            // 3. Find the end of this frame's headers (\r\n\r\n).
+            final headerEndIndex = _indexOfBytes(buffer, headerEnd, start: pos);
+            if (headerEndIndex < 0) {
+              // Headers not fully received yet — wait for more data, but trim
+              // the discarded prefix so the buffer doesn't grow forever.
+              buffer = buffer.sublist(boundaryIndex);
+              break;
+            }
 
-            // Extract frame body between boundaries
-            final frameSection = buffer.sublist(boundaryIndex, nextBoundary);
-
-            // Find JPEG data (after \r\n\r\n headers)
-            final headerEndIndex = _indexOfBytes(frameSection, headerEnd);
-            if (headerEndIndex > 0) {
-              final jpegStart = headerEndIndex + headerEnd.length;
-              final jpegBytes = frameSection.sublist(jpegStart);
-              if (jpegBytes.length > 100) {
-                frameCount++;
-                if (frameCount == 1) {
-                  AppLog.info('HttpCam', 'First MJPEG frame received (${jpegBytes.length} bytes)');
-                }
-                // Valid JPEG should be > 100 bytes
-                if (!controller.isClosed) {
-                  controller.add(Uint8List.fromList(jpegBytes));
-                }
+            // 4. Parse Content-Length from the headers (fallback if missing).
+            final headerStr = String.fromCharCodes(
+                buffer.sublist(pos, headerEndIndex));
+            var contentLength = -1;
+            for (final line in headerStr.split('\r\n')) {
+              final lower = line.toLowerCase();
+              if (lower.startsWith('content-length:')) {
+                contentLength =
+                    int.tryParse(line.substring(15).trim()) ?? -1;
+                break;
               }
             }
 
-            // Remove processed data from buffer
-            buffer = buffer.sublist(nextBoundary);
+            final jpegStart = headerEndIndex + headerEnd.length;
+
+            if (contentLength > 0) {
+              // 5a. Need contentLength bytes available after headers.
+              if (jpegStart + contentLength > buffer.length) {
+                // Not enough body yet — wait for more, trim prefix.
+                buffer = buffer.sublist(boundaryIndex);
+                break;
+              }
+              final jpegBytes =
+                  buffer.sublist(jpegStart, jpegStart + contentLength);
+
+              // Skip past JPEG + optional trailing CRLF.
+              pos = jpegStart + contentLength;
+              if (pos + 2 <= buffer.length &&
+                  buffer[pos] == crlf[0] && buffer[pos + 1] == crlf[1]) {
+                pos += 2;
+              }
+              buffer = buffer.sublist(pos);
+
+              _emitFrame(controller, jpegBytes, frameCount);
+              frameCount++;
+            } else {
+              // 5b. No Content-Length — fall back to scanning for the next
+              // boundary and taking everything in between.
+              final nextBoundary = _indexOfBytes(
+                buffer,
+                boundaryBytes,
+                start: jpegStart,
+              );
+              if (nextBoundary < 0) {
+                // Incomplete frame — wait for more, trim prefix.
+                buffer = buffer.sublist(boundaryIndex);
+                break;
+              }
+              final jpegBytes = buffer.sublist(jpegStart, nextBoundary);
+              buffer = buffer.sublist(nextBoundary);
+
+              _emitFrame(controller, jpegBytes, frameCount);
+              frameCount++;
+            }
           }
         }
+
+        AppLog.info('HttpCam', 'Live view stream ended after $frameCount frames');
       } catch (e) {
         AppLog.error('HttpCam', 'Live view error after $frameCount frames', e);
         debugPrint('[HttpCamera] live view error: $e');
@@ -170,6 +232,21 @@ class HttpCameraProtocol extends CameraProtocol {
     }();
 
     return controller.stream;
+  }
+
+  void _emitFrame(
+      StreamController<Uint8List> controller, List<int> jpegBytes, int frameCount) {
+    // JPEG data must start with the SOI marker (0xFF 0xD8).
+    if (jpegBytes.length < 2 ||
+        jpegBytes[0] != 0xFF || jpegBytes[1] != 0xD8) {
+      return;
+    }
+    if (frameCount == 0) {
+      AppLog.info('HttpCam', 'First MJPEG frame received (${jpegBytes.length} bytes)');
+    }
+    if (!controller.isClosed) {
+      controller.add(Uint8List.fromList(jpegBytes));
+    }
   }
 
   @override
@@ -294,11 +371,11 @@ class HttpCameraProtocol extends CameraProtocol {
         await semaphore.acquire();
         try {
           Uint8List? thumbnail;
-          if (entry.type == 'photo') {
-            try {
-              thumbnail = await _getThumbnailBytes(entry.name);
-            } catch (_) {}
-          }
+          // v1.3: thumbnails supported for both photos and videos.
+          // For videos the server extracts the first MJPEG frame.
+          try {
+            thumbnail = await _getThumbnailBytes(entry.name);
+          } catch (_) {}
 
           photos.add(CameraPhoto(
             id: entry.name,

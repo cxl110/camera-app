@@ -3,9 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/camera_protocol.dart';
 import '../services/filter_processor.dart';
-import '../services/http_camera_protocol.dart';
 import '../widgets/film_presets.dart';
 import '../widgets/grain_control.dart';
 import '../widgets/light_leak_control.dart';
@@ -13,6 +11,7 @@ import '../widgets/bottom_tabs.dart';
 import '../services/image_service.dart';
 import '../services/neural_filter_client.dart';
 import 'borders_screen.dart';
+import 'gallery_screen.dart';
 
 /// EFFECTS filter page.
 ///
@@ -444,44 +443,12 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   void _onOpenAlbum() async {
-    final protocol = context.read<CameraProtocol>();
-    final imageService = context.read<ImageService>();
-    try {
-      final result = await protocol.listPhotos(limit: 20);
-      if (!mounted) return;
-
-      if (result.photos.isNotEmpty) {
-        final firstPhoto = result.photos.first;
-        Uint8List? bytes = firstPhoto.fullImage;
-
-        // Download full image if protocol doesn't preload it
-        if (bytes == null && protocol is HttpCameraProtocol) {
-          bytes = await (protocol as HttpCameraProtocol).downloadPhotoBytes(firstPhoto.id);
-        }
-
-        bytes ??= firstPhoto.thumbnail;
-
-        if (bytes != null) {
-          imageService.loadPhoto(bytes, name: firstPhoto.name);
-          // _originalSource will be detected in build() → triggers _applyFilter
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('已加载 ${result.photos.length} 张照片'),
-            backgroundColor: const Color(0xFF1A1A2E),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('加载失败: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+    // 跳转相册浏览页（iOS 相册风格），而不是直接加载第一张照片。
+    // EFFECTS 页本身不持有 live view，直接 push 即可。
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GalleryScreen()),
+    );
   }
 
   void _onSaveFiltered() async {
