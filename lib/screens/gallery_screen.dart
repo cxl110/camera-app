@@ -201,16 +201,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
             AppLog.error('Gallery', 'Video transcode failed: ${photo.name}');
           }
         } else {
-          // ── Photo: x2 upscale + save ──
+          // ── Photo: save (no upscale, keep original 12MP) ──
           setState(() => _currentProgress = 0.5);
-          try {
-            final upscaled = await CoreMLBridge.upscalePhoto(imageBytes: bytes);
-            if (upscaled != null && !_isAllBlack(upscaled)) {
-              bytes = upscaled;
-            }
-          } catch (_) {}
-
-          setState(() => _currentProgress = 0.8);
 
           final saveBytes = bytes;
           if (saveBytes != null) {
@@ -290,21 +282,23 @@ class _GalleryScreenState extends State<GalleryScreen> {
       final file = File('${dir.path}/$fileName');
       await file.writeAsString(logText);
 
-      // iOS 照片库不会显示 .txt 文件，改用系统分享面板：
-      // 用户可选择「存储到"文件"」、AirDrop、发到聊天等。
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: '相机APP日志',
-        text: '相机APP日志导出',
-      );
+      // Try share sheet first; fall back to just showing the path.
+      try {
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          subject: '相机APP日志',
+          text: '相机APP日志导出',
+        );
+      } catch (_) {
+        // share_plus may fail if not configured for iOS; path is still shown.
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('日志文件: $fileName\n'
-              '路径: ${file.path}\n已通过分享面板导出'),
+          content: Text('日志已保存: $fileName\n路径: ${dir.path}/$fileName'),
           backgroundColor: const Color(0xFF2E7D32),
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 5),
         ),
       );
     } catch (e) {

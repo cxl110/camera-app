@@ -25,6 +25,14 @@ class ImageService extends ChangeNotifier {
   Uint8List? currentPhoto;
   String? currentPhotoName;
 
+  // Filter state preserved across page navigations.
+  String selectedPreset = 'NONE';
+  bool grainEnabled = false;
+  double grainIntensity = 40.0;
+  bool lightLeakEnabled = false;
+  double lightLeakIntensity = 30.0;
+  String lightLeakStyle = 'WARM';
+
   bool get hasCurrentPhoto => currentPhoto != null;
 
   bool get isInitialized => _isInitialized;
@@ -100,23 +108,24 @@ class ImageService extends ChangeNotifier {
     return cacheFile;
   }
 
-  /// Save a photo with optional x2 CoreML upscale.
+  /// Save a photo to local storage and system gallery.
   ///
-  /// Tries CoreML on-device upscale first; validates the result is not all-black
-  /// before accepting it. Falls back to the original image bytes if upscale fails
-  /// or produces invalid output.
+  /// If [upscale] is true, applies x2 CoreML super-resolution before saving.
+  /// Defaults to false — the original 12MP resolution is usually sufficient.
   Future<File> saveWithUpscale(Uint8List imageBytes, String originalName,
-      {NeuralFilterClient? neuralClient}) async {
+      {NeuralFilterClient? neuralClient, bool upscale = false}) async {
     Uint8List finalBytes = imageBytes;
 
-    // Try CoreML on-device super-resolution upscale
-    try {
-      final coremlUpscaled = await CoreMLBridge.upscalePhoto(imageBytes: imageBytes);
-      if (coremlUpscaled != null && !_isAllBlack(coremlUpscaled)) {
-        finalBytes = coremlUpscaled;
+    if (upscale) {
+      // Try CoreML on-device super-resolution upscale
+      try {
+        final coremlUpscaled = await CoreMLBridge.upscalePhoto(imageBytes: imageBytes);
+        if (coremlUpscaled != null && !_isAllBlack(coremlUpscaled)) {
+          finalBytes = coremlUpscaled;
+        }
+      } catch (_) {
+        // Fall through to original bytes
       }
-    } catch (_) {
-      // Fall through to original bytes
     }
 
     final name = p.basenameWithoutExtension(originalName);

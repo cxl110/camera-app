@@ -325,9 +325,22 @@ class FilterProcessor {
   }
 
   /// Apply a named film filter to image bytes.
-  /// Uses local color matrix simulation (fast, reliable, no CoreML dependency).
+  /// Uses CoreML on-device inference with Neural Engine acceleration.
+  /// Falls back to local color matrix simulation if CoreML is unavailable.
   static Future<Uint8List> apply(Uint8List input, String filterName) async {
-    // Local simulation — always works, no model loading or CoreML issues.
+    // Try CoreML first (Neural Engine, fast).
+    try {
+      final result = await CoreMLBridge.applyFilter(
+        imageBytes: input,
+        modelName: filterName,
+        patchSize: 448,
+        padding: 16,
+      );
+      if (result != null && result.length > 100) return result;
+    } catch (e) {
+      debugPrint('[FilterProcessor] CoreML failed, fallback to local: $e');
+    }
+    // Fallback to local color matrix simulation.
     return _applyLocal(input, filterName);
   }
 

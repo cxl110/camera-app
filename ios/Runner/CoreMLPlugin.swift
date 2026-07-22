@@ -447,10 +447,37 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
                     width: outCropW, height: outCropH
                 )
 
-                // Draw into output context
+                // Draw into output context with feather blending at tile edges.
+                // Without feathering, slight brightness differences between
+                // adjacent tiles produce visible grid lines.
+                let hasNeighbourLeft = col > 0
+                let hasNeighbourRight = col < cols - 1
+                let hasNeighbourTop = row > 0
+                let hasNeighbourBottom = row < rows - 1
+
+                // Only apply feather mask if this tile shares at least one
+                // boundary with another tile (internal tiles have all four).
+                let needsFeather = hasNeighbourLeft || hasNeighbourRight
+                                || hasNeighbourTop || hasNeighbourBottom
+
                 let croppedImage = UIImage(cgImage: croppedCGImage)
                 UIGraphicsPushContext(context)
-                croppedImage.draw(in: destRect)
+                if needsFeather, let mask = featherMask(
+                    size: destRect.size,
+                    padding: outPadding,
+                    left: hasNeighbourLeft,
+                    right: hasNeighbourRight,
+                    top: hasNeighbourTop,
+                    bottom: hasNeighbourBottom
+                ) {
+                    // Clip to the feather mask so edges fade out.
+                    context.saveGState()
+                    context.clip(to: destRect, mask: mask)
+                    croppedImage.draw(in: destRect)
+                    context.restoreGState()
+                } else {
+                    croppedImage.draw(in: destRect)
+                }
                 UIGraphicsPopContext()
             }
         }
@@ -570,6 +597,63 @@ public class CoreMLPlugin: NSObject, FlutterPlugin {
     /// Clear the model cache.
     func clearCache() {
         modelCache.removeAll()
+    }
+
+    // MARK: - Feather Mask for Tile Blending
+
+    /// Create a CGImage mask that fades to black (transparent) at tile edges
+    /// that have neighbours. Internal edges get a linear ramp from 1→0
+    /// over `padding` pixels; external edges (image border) stay fully
+    /// opaque so the edge of the image doesn't fade.
+    private func featherMask(
+        size: CGSize,
+        padding: Int,
+        left: Bool,
+        right: Bool,
+        top: Bool,
+        bottom: Bool
+    ) -> CGImage? {
+        let w = Int(size.width)
+        let h = Int(size.height)
+        let pad = CGFloat(padding)
+        guard w > 0, h > 0 else { return nil }
+
+        let bytesPerRow = w
+        var data = [UInt8](repeating: 0, count: w * h)
+
+        for y in 0..<h {
+            for x in 0..<w {
+                let fx = CGFloat(x)
+                let fy = CGFloat(y)
+                let cw = CGFloat(w)
+                let ch = CGFloat(h)
+
+                var alpha: CGFloat = 1.0
+
+                if left   { alpha *= min(fx, pad) / pad }
+                if right  { alpha *= min(cw - 1 - fx, pad) / pad }
+                if top    { alpha *= min(fy, pad) / pad }
+                if bottom { alpha *= min(ch - 1 - fy, pad) / pad }
+
+                data[y * bytesPerRow + x] = UInt8(min(max(alpha, 0), 1) * 255)
+            }
+        }
+
+        guard let provider = CGDataProvider(data: NSData(bytes: &data,
+                                                     length: data.count)) else {
+            return nil
+        }
+        return CGImage(
+            width: w, height: h,
+            bitsPerComponent: 8, bitsPerPixel: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
     }
 }
 

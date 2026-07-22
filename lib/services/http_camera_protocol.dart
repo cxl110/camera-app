@@ -27,6 +27,9 @@ class HttpCameraProtocol extends CameraProtocol {
   http.StreamedResponse? _liveViewResponse;
   bool _liveViewRunning = false;
 
+  /// The active live-view stream controller (broadcast). Closed on stop.
+  StreamController<Uint8List>? _liveViewController;
+
   HttpCameraProtocol({String? baseUrl, http.Client? client})
       : baseUrl = (baseUrl ?? _defaultBaseUrl).replaceAll(RegExp(r'/$'), ''),
         _client = client ?? http.Client();
@@ -93,6 +96,7 @@ class HttpCameraProtocol extends CameraProtocol {
     // StreamBuilder listens for frames. A single-subscription stream would
     // let the first listener swallow every frame and leave the preview blank.
     final controller = StreamController<Uint8List>.broadcast();
+    _liveViewController = controller;
     var frameCount = 0;
 
     _liveViewRunning = true;
@@ -228,6 +232,7 @@ class HttpCameraProtocol extends CameraProtocol {
         if (!controller.isClosed) {
           controller.close();
         }
+        _liveViewController = null;
       }
     }();
 
@@ -252,8 +257,13 @@ class HttpCameraProtocol extends CameraProtocol {
   @override
   Future<void> stopLiveView() async {
     _liveViewRunning = false;
+    // Cancel the HTTP response stream immediately so the async loop exits.
+    _liveViewResponse?.cancel();
     _liveViewResponse = null;
-    // The stream will detect _liveViewRunning==false and stop itself
+    // Close the stream controller if still open.
+    _liveViewController?.close();
+    _liveViewController = null;
+    AppLog.info('HttpCam', 'Live view stopped');
   }
 
   /// Find first occurrence of [needle] in [haystack], starting from [start].
@@ -273,9 +283,14 @@ class HttpCameraProtocol extends CameraProtocol {
   @override
   Future<CaptureResult> capturePhoto({bool flash = false}) async {
     // POST /capture — trigger photo capture, returns {status, filename}
+    // API spec: capture is synchronous, up to ~2.5s blocking. Use 10s to be safe.
+    AppLog.info('HttpCam', 'Sending capture request...');
     final capResponse = await _client
         .post(Uri.parse('$baseUrl/capture'))
-        .timeout(const Duration(seconds: 5));
+        .timeout(const Duration(seconds: 10));
+
+    AppLog.info('HttpCam',
+        'Capture response: HTTP ${capResponse.statusCode}, body=${capResponse.body}');
 
     if (capResponse.statusCode != 200) {
       throw Exception('Capture failed: HTTP ${capResponse.statusCode}');
@@ -288,6 +303,7 @@ class HttpCameraProtocol extends CameraProtocol {
     }
 
     // Download the captured photo directly
+    AppLog.info('HttpCam', 'Downloading captured photo: $filename');
     final fullImage = await downloadPhotoBytes(filename);
     final thumbnail = await _getThumbnailBytes(filename);
 
@@ -496,6 +512,11 @@ class HttpCameraProtocol extends CameraProtocol {
   /// Release HTTP client resources.
   void dispose() {
     _connectionCtrl.close();
+    _liveViewRunning = false;
+    _liveViewResponse?.cancel();
+    _liveViewResponse = null;
+    _liveViewController?.close();
+    _liveViewController = null;
     _client.close();
   }
 }

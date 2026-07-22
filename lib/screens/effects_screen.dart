@@ -109,8 +109,15 @@ class _EffectsScreenState extends State<EffectsScreen> {
   @override
   void initState() {
     super.initState();
-    // Schedule initial filter application after first frame
+    // Restore filter state from ImageService (persists across page navigations).
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      final srv = context.read<ImageService>();
+      _selectedPreset = srv.selectedPreset;
+      _grainEnabled = srv.grainEnabled;
+      _grainIntensity = srv.grainIntensity;
+      _lightLeakEnabled = srv.lightLeakEnabled;
+      _lightLeakIntensity = srv.lightLeakIntensity;
+      _lightLeakStyle = srv.lightLeakStyle;
       _initFilter();
     });
   }
@@ -207,10 +214,12 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     intensity: _grainIntensity,
                     onToggle: (v) {
                       setState(() => _grainEnabled = v);
+                      context.read<ImageService>().grainEnabled = v;
                       _applyPostEffects();
                     },
                     onIntensityChanged: (v) {
                       setState(() => _grainIntensity = v);
+                      context.read<ImageService>().grainIntensity = v;
                       _applyPostEffects();
                     },
                   ),
@@ -224,14 +233,17 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     selectedStyle: _lightLeakStyle,
                     onToggle: (v) {
                       setState(() => _lightLeakEnabled = v);
+                      context.read<ImageService>().lightLeakEnabled = v;
                       _applyPostEffects();
                     },
                     onIntensityChanged: (v) {
                       setState(() => _lightLeakIntensity = v);
+                      context.read<ImageService>().lightLeakIntensity = v;
                       _applyPostEffects();
                     },
                     onStyleChanged: (s) {
                       setState(() => _lightLeakStyle = s);
+                      context.read<ImageService>().lightLeakStyle = s;
                       _applyPostEffects();
                     },
                   ),
@@ -513,8 +525,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
       return;
     }
 
+    // Write preset name into ImageService (persists across page nav).
+    context.read<ImageService>().selectedPreset = preset;
     setState(() {
-      _selectedPreset = preset;
       _showBefore = false;
     });
 
@@ -528,22 +541,23 @@ class _EffectsScreenState extends State<EffectsScreen> {
     _startSpinner();
     debugPrint('[Effects] applying filter: $preset on ${source.length} bytes');
 
-    // Force minimum spinner display time so user can see it
+    // Ensure spinner shows for at least 1200ms so user can see the verb.
     final spinnerStart = DateTime.now();
 
     // Process neural inference in background
     FilterProcessor.apply(source, preset).then((filtered) {
       if (!mounted) return;
-      // Ensure spinner shows for at least 600ms
+      debugPrint('[Effects] filter result: ${filtered.length} bytes');
+      _baseFilteredImage = filtered;
+
+      // Make sure spinner shows for at least 1200ms.
       final elapsed = DateTime.now().difference(spinnerStart).inMilliseconds;
-      final delay = elapsed < 600 ? 600 - elapsed : 0;
+      final delay = elapsed < 1200 ? 1200 - elapsed : 0;
       Future.delayed(Duration(milliseconds: delay), () {
         if (!mounted) return;
         _stopSpinner();
+        _applyPostEffects();
       });
-      debugPrint('[Effects] filter result: ${filtered.length} bytes');
-      _baseFilteredImage = filtered;
-      _applyPostEffects();
     }).catchError((e) {
       _stopSpinner();
       debugPrint('[Effects] filter error: $e');
