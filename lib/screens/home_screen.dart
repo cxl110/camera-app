@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
-import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/app_log.dart';
 import '../services/log_uploader.dart';
@@ -74,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (_isConnected) {
           AppLog.info('Home', 'Camera connected: $_cameraModel');
           _isVerifying = false;
-          _syncTimeIfNeeded();
+          // RTC sync handled by HttpCameraProtocol internally
           // Only start live view if we were NOT already connected.
           if (!wasConnected) _startLiveView();
         } else {
@@ -110,7 +109,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       if (status.connected && !wasConnected) {
         _startLiveView();
-        _syncTimeIfNeeded();
       }
     } catch (_) {
       // Silent retry — don't change connection state on transient failures.
@@ -118,15 +116,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  bool _timeSynced = false;
-
-  void _syncTimeIfNeeded() {
-    if (_timeSynced) return;
-    _timeSynced = true;
-    if (_protocol is HttpCameraProtocol) {
-      (_protocol as HttpCameraProtocol).syncRtc();
-    }
-  }
+  // RTC sync is now handled internally by HttpCameraProtocol
+  // (auto-syncs on connection + every 3 minutes)
 
   void _showWiFiGuide() {
     if (!mounted) return;
