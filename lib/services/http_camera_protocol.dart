@@ -157,15 +157,16 @@ class HttpCameraProtocol extends CameraProtocol {
 
   /// Send honeypot heartbeat with token.
   Future<void> _sendHeartbeat() async {
+    final token = _computeToken();
     try {
       final request = http.Request('GET', Uri.parse('$baseUrl/heartbeat'));
-      request.headers['User-Agent'] = _userAgent();
+      request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
       final response = await _client.send(request).timeout(const Duration(seconds: 3));
       // Drain the response body
       await response.stream.drain();
-      AppLog.debug('HttpCam', 'Heartbeat OK');
+      AppLog.info('HttpCam', 'Heartbeat OK (token=$token, HTTP ${response.statusCode})');
     } catch (e) {
-      AppLog.debug('HttpCam', 'Heartbeat failed: $e');
+      AppLog.info('HttpCam', 'Heartbeat FAILED (token=$token): $e');
     }
   }
 
@@ -177,7 +178,6 @@ class HttpCameraProtocol extends CameraProtocol {
       throw StateError('Live view is already running');
     }
 
-    AppLog.info('HttpCam', 'Starting MJPEG live view stream...');
     // Broadcast: HomeScreen listens for errors/done, CameraPreview's
     // StreamBuilder listens for frames. A single-subscription stream would
     // let the first listener swallow every frame and leave the preview blank.
@@ -191,7 +191,9 @@ class HttpCameraProtocol extends CameraProtocol {
       try {
         final request = http.Request('GET', Uri.parse('$baseUrl/stream'));
         // Stream is authenticated — token checked at connection start only
-        request.headers['User-Agent'] = _userAgent();
+        final token = _computeToken();
+        request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
+        AppLog.info('HttpCam', 'Starting MJPEG live view stream (token=$token)...');
         _liveViewResponse = await _client.send(request).timeout(
           const Duration(seconds: 5),
           onTimeout: () => throw TimeoutException('Live view connection timeout'),
@@ -372,7 +374,7 @@ class HttpCameraProtocol extends CameraProtocol {
   Future<CaptureResult> capturePhoto({bool flash = false}) async {
     // POST /capture — trigger photo capture, returns {status, filename}
     // API spec: capture is synchronous, up to ~2.5s blocking. Use 10s to be safe.
-    AppLog.info('HttpCam', 'Sending capture request...');
+    AppLog.info('HttpCam', 'Sending capture request (token=${_computeToken()})...');
     final capResponse = await _client
         .post(Uri.parse('$baseUrl/capture'), headers: _authHeaders)
         .timeout(const Duration(seconds: 10));
@@ -432,10 +434,10 @@ class HttpCameraProtocol extends CameraProtocol {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'timestamp': now}),
       ).timeout(const Duration(seconds: 3));
-      AppLog.debug('HttpCam', 'RTC synced: timestamp=$now');
+      AppLog.info('HttpCam', 'RTC synced: timestamp=$now');
     } catch (e) {
       // Silently ignore — RTC sync is best-effort
-      AppLog.debug('HttpCam', 'RTC sync failed: $e');
+      AppLog.info('HttpCam', 'RTC sync failed: $e');
     }
   }
 
@@ -448,6 +450,7 @@ class HttpCameraProtocol extends CameraProtocol {
     String sort = 'date_desc',
   }) async {
     try {
+      AppLog.info('HttpCam', 'listPhotos: offset=$offset, limit=$limit (token=${_computeToken()})');
       final uri = Uri.parse('$baseUrl/list').replace(
         queryParameters: {
           'offset': offset.toString(),
@@ -520,6 +523,7 @@ class HttpCameraProtocol extends CameraProtocol {
   /// Get thumbnail bytes for a photo filename.
   Future<Uint8List?> _getThumbnailBytes(String filename) async {
     try {
+      AppLog.info('HttpCam', 'getThumbnail: $filename (token=${_computeToken()})');
       final response = await _client
           .get(Uri.parse('$baseUrl/thumb/$filename'), headers: _authHeaders)
           .timeout(const Duration(seconds: 5));
@@ -542,8 +546,10 @@ class HttpCameraProtocol extends CameraProtocol {
   Stream<DownloadProgress> downloadPhoto(String photoId,
       {PhotoQuality quality = PhotoQuality.original}) async* {
     try {
+      final token = _computeToken();
+      AppLog.info('HttpCam', 'downloadPhoto (stream): $photoId (token=$token)');
       final request = http.Request('GET', Uri.parse('$baseUrl/file/$photoId'));
-      request.headers['User-Agent'] = _userAgent();
+      request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
       final response = await _client.send(request).timeout(const Duration(seconds: 60));
 
       if (response.statusCode != 200) {
@@ -578,6 +584,7 @@ class HttpCameraProtocol extends CameraProtocol {
   /// Download a photo and return its bytes directly (convenience wrapper).
   Future<Uint8List?> downloadPhotoBytes(String photoId) async {
     try {
+      AppLog.info('HttpCam', 'downloadPhoto: $photoId (token=${_computeToken()})');
       final response = await _client
           .get(Uri.parse('$baseUrl/file/$photoId'), headers: _authHeaders)
           .timeout(const Duration(seconds: 60));
@@ -594,6 +601,7 @@ class HttpCameraProtocol extends CameraProtocol {
   @override
   Future<bool> deletePhoto(String photoId) async {
     try {
+      AppLog.info('HttpCam', 'deletePhoto: $photoId (token=${_computeToken()})');
       final response = await _client
           .delete(Uri.parse('$baseUrl/file/$photoId'), headers: _authHeaders)
           .timeout(const Duration(seconds: 5));
