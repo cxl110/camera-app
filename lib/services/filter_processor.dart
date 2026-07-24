@@ -685,6 +685,19 @@ class FilterProcessor {
     return Uint8List.fromList(img.encodeJpg(image, quality: 95));
   }
 
+  /// Isolate-friendly wrapper for [applyPostEffects].
+  /// Call via `compute(FilterProcessor.applyPostEffectsIsolate, params)`.
+  static Uint8List applyPostEffectsIsolate(Map<String, dynamic> params) {
+    return applyPostEffects(
+      params['input'] as Uint8List,
+      grainIntensity: params['grainIntensity'] as double,
+      lightLeakIntensity: params['lightLeakIntensity'] as double,
+      lightLeakRange: params['lightLeakRange'] as double,
+      lightLeakStyle: params['lightLeakStyle'] as String,
+      imageName: params['imageName'] as String?,
+    );
+  }
+
   /// Generate a stable seed so the same photo always gets the same pattern.
   static int _deriveSeed(Uint8List bytes, String? name) {
     if (name != null && name.isNotEmpty) {

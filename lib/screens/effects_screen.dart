@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -619,9 +620,6 @@ class _EffectsScreenState extends State<EffectsScreen> {
     // Only show when effects are actually active — no spinner for plain NONE.
     if (grainI > 0 || leakI > 0) {
       _startSpinner();
-      // Let the UI render the spinner for at least one frame before the
-      // synchronous computation blocks the thread.
-      await Future.delayed(const Duration(milliseconds: 30));
     }
 
     setState(() => _isProcessing = true);
@@ -632,13 +630,14 @@ class _EffectsScreenState extends State<EffectsScreen> {
         // No post-effects — use pure filter result directly.
         result = pureBase;
       } else {
-        result = FilterProcessor.applyPostEffects(
-          pureBase,
-          grainIntensity: grainI,
-          lightLeakIntensity: leakI,
-          lightLeakRange: leakRange,
-          lightLeakStyle: _lightLeakStyle,
-        );
+        // Run in isolate so UI thread is not blocked — spinner animates smoothly.
+        result = await compute(FilterProcessor.applyPostEffectsIsolate, {
+          'input': pureBase,
+          'grainIntensity': grainI,
+          'lightLeakIntensity': leakI,
+          'lightLeakRange': leakRange,
+          'lightLeakStyle': _lightLeakStyle,
+        });
       }
 
       if (!mounted) return;
