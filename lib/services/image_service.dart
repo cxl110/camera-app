@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import 'neural_filter_client.dart';
 import 'coreml_bridge.dart';
+import 'app_log.dart';
 
 /// Manages local photo storage, caching, and image operations.
 class ImageService extends ChangeNotifier {
@@ -110,23 +111,32 @@ class ImageService extends ChangeNotifier {
 
   /// Save a photo to local storage and system gallery.
   ///
-  /// If [upscale] is true, applies x2 CoreML super-resolution before saving.
-  /// Defaults to false — the original 12MP resolution is usually sufficient.
+  /// By default applies x2 CoreML super-resolution before saving (3MP → 12MP).
+  /// The APP UI always works with downsampled previews; full upscale only
+  /// happens at save time.
   Future<File> saveWithUpscale(Uint8List imageBytes, String originalName,
-      {NeuralFilterClient? neuralClient, bool upscale = false}) async {
+      {NeuralFilterClient? neuralClient, bool upscale = true}) async {
     Uint8List finalBytes = imageBytes;
 
     if (upscale) {
       // Try CoreML on-device super-resolution upscale
+      AppLog.info('ImageService', 'Upscale input: ${imageBytes.length} bytes');
       try {
         final coremlUpscaled = await CoreMLBridge.upscalePhoto(imageBytes: imageBytes);
         if (coremlUpscaled != null && !_isAllBlack(coremlUpscaled)) {
+          AppLog.info('ImageService',
+              'Upscale done: ${imageBytes.length}B → ${coremlUpscaled.length}B');
           finalBytes = coremlUpscaled;
+        } else {
+          AppLog.error('ImageService', 'Upscale returned null or all-black');
         }
-      } catch (_) {
-        // Fall through to original bytes
+      } catch (e) {
+        AppLog.error('ImageService', 'Upscale failed, fallback to original', e);
       }
     }
+
+    AppLog.info('ImageService',
+        'Saving: ${finalBytes.length} bytes, upscale=$upscale, name=$originalName');
 
     final name = p.basenameWithoutExtension(originalName);
     final outputPath = p.join(_editedDir!.path, '${name}.jpg');

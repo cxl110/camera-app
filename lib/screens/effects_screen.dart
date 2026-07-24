@@ -40,7 +40,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
   Uint8List? _displayImage;
 
   /// The pure filter result (no grain/leak). Cached so we don't re-run CoreML
-  /// when only grain/leak settings change.
+  /// when only grain/leak settings change. Post-effects always start from
+  /// THIS, never from an already-grained/leaked result — otherwise toggling
+  /// grain/leak would stack effects on top of each other.
   Uint8List? _baseFilteredImage;
 
   // Debounce timer for post-effect slider changes
@@ -125,7 +127,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
   /// Initialize: apply default filter to the loaded photo.
   void _initFilter() {
     final imageService = context.read<ImageService>();
-    final original = imageService.originalPhoto ?? imageService.currentPhoto;
+    // Always use originalPhoto (full resolution). Never use currentPhoto
+    // which may be a thumbnail from camera capture.
+    final original = imageService.originalPhoto;
     if (original == null) return;
     _originalSource = original;
     _applyFilter(_selectedPreset);
@@ -136,12 +140,15 @@ class _EffectsScreenState extends State<EffectsScreen> {
     final imageService = context.watch<ImageService>();
 
     // Detect when a NEW photo is loaded (different from our source).
-    // Only reset when originalPhoto actually changes identity.
+    // Always reset when originalPhoto changes identity — even if a filter
+    // was already applied, the new photo needs fresh processing.
     final newOriginal = imageService.originalPhoto;
-    if (newOriginal != null && !identical(newOriginal, _originalSource)) {
+    if (newOriginal != null &&
+        !identical(newOriginal, _originalSource) &&
+        !_isProcessing) {
       _originalSource = newOriginal;
-      _displayImage = null;
       _baseFilteredImage = null;
+      _displayImage = null;
       // Apply filter in next frame to avoid calling setState during build
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _applyFilter(_selectedPreset);
@@ -166,7 +173,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
               Icon(Icons.wifi_off, size: 48, color: Colors.white.withValues(alpha: 0.2)),
               const SizedBox(height: 16),
               Text(
-                '请先连接相机WiFi',
+                'Please connect to camera WiFi first',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 15),
               ),
             ],
@@ -212,9 +219,12 @@ class _EffectsScreenState extends State<EffectsScreen> {
                   GrainControl(
                     enabled: _grainEnabled,
                     intensity: _grainIntensity,
+                    processingVerb: _showSpinner ? _spinnerVerbs[_spinnerIndex] : null,
                     onToggle: (v) {
                       setState(() => _grainEnabled = v);
                       context.read<ImageService>().grainEnabled = v;
+                      // Show spinner immediately when turning grain ON
+                      if (v) _startSpinner();
                       _applyPostEffects();
                     },
                     onIntensityChanged: (v) {
@@ -231,9 +241,12 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     enabled: _lightLeakEnabled,
                     intensity: _lightLeakIntensity,
                     selectedStyle: _lightLeakStyle,
+                    processingVerb: _showSpinner ? _spinnerVerbs[_spinnerIndex] : null,
                     onToggle: (v) {
                       setState(() => _lightLeakEnabled = v);
                       context.read<ImageService>().lightLeakEnabled = v;
+                      // Show spinner immediately when turning leak ON
+                      if (v) _startSpinner();
                       _applyPostEffects();
                     },
                     onIntensityChanged: (v) {
@@ -290,18 +303,18 @@ class _EffectsScreenState extends State<EffectsScreen> {
           IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 22),
             onPressed: () => Navigator.pop(context),
-            tooltip: '返回',
+            tooltip: 'Back',
           ),
           const Spacer(),
           IconButton(
             icon: Icon(Icons.save_alt, color: Colors.white.withValues(alpha: 0.7), size: 22),
             onPressed: (imageService.currentPhoto != null && !_isSaving) ? _onSaveFiltered : null,
-            tooltip: '保存',
+            tooltip: 'Save',
           ),
           IconButton(
             icon: Icon(Icons.folder_outlined, color: Colors.white.withValues(alpha: 0.7), size: 22),
             onPressed: _onOpenAlbum,
-            tooltip: '相册',
+            tooltip: 'Album',
           ),
         ],
       ),
@@ -428,13 +441,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
-            width: 12, height: 12,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD89A0F)),
-            ),
-          ),
+          const _SpinningDot(),
           const SizedBox(width: 8),
           Text(
             _spinnerVerbs[_spinnerIndex],
@@ -465,23 +472,41 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _onSaveFiltered() async {
     final imageService = context.read<ImageService>();
-    // Use full-resolution output with effects applied
-    final output = _getFullResOutput() ?? _displayImage ?? imageService.currentPhoto;
-    if (output == null) return;
+    // Always generate full-resolution output for saving from _baseFilteredImage.
+    // Never save the downsampled preview (which is only ~400-500KB instead of 3MP).
+    final base = _baseFilteredImage ?? imageService.originalPhoto;
+    if (base == null) return;
+    debugPrint('[Effects] Saving: base image ${base.length} bytes');
 
+    // Show saving indicator IMMEDIATELY — before any synchronous computation.
     setState(() => _isSaving = true);
 
+    // Let the UI render the spinner for at least one frame before blocking work.
+    await Future.delayed(const Duration(milliseconds: 50));
+
+    final grainI = _grainEnabled ? _grainIntensity : 0.0;
+    final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
+    final leakI = leakRange > 0 ? (40.0 + leakRange * 0.6) : 0.0;
+
+    Uint8List output;
+    if (grainI <= 0 && leakI <= 0) {
+      output = base;
+    } else {
+      output = FilterProcessor.applyPostEffects(
+        base, grainIntensity: grainI, lightLeakIntensity: leakI,
+        lightLeakRange: leakRange, lightLeakStyle: _lightLeakStyle,
+      );
+    }
+
     try {
-      final neuralClient = NeuralFilterClient();
       await imageService.saveWithUpscale(
         output,
-        imageService.currentPhotoName ?? '${_selectedPreset}_${DateTime.now().millisecondsSinceEpoch}',
-        neuralClient: neuralClient,
+        imageService.currentPhotoName ?? 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已保存 $_selectedPreset'),
+          content: Text('Photo saved'),
           backgroundColor: const Color(0xFF2E7D32),
           duration: const Duration(seconds: 2),
         ),
@@ -489,7 +514,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -517,7 +542,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   /// Apply a named filter preset to the original photo.
-  void _applyFilter(String preset) {
+  Future<void> _applyFilter(String preset) async {
     // Always use original photo as source (never a previously filtered result)
     final source = _originalSource;
     if (source == null) {
@@ -528,18 +553,31 @@ class _EffectsScreenState extends State<EffectsScreen> {
     // Write preset name into ImageService (persists across page nav).
     context.read<ImageService>().selectedPreset = preset;
     setState(() {
+      _selectedPreset = preset;
       _showBefore = false;
     });
 
-    // NONE = no filter, use original directly
+    // NONE = no filter, use original directly. Reset grain/leak.
     if (preset == 'NONE') {
       _baseFilteredImage = source;
-      _applyPostEffects();
+      _displayImage = null;
+      _grainEnabled = false;
+      _lightLeakEnabled = false;
+      setState(() {});
       return;
     }
 
+    // Reset grain/leak when switching filters — each filter starts clean.
+    _grainEnabled = false;
+    _lightLeakEnabled = false;
+    _grainIntensity = 40.0;
+    _lightLeakIntensity = 30.0;
+
     _startSpinner();
     debugPrint('[Effects] applying filter: $preset on ${source.length} bytes');
+
+    // Let the spinner render for at least one frame before starting inference.
+    await Future.delayed(const Duration(milliseconds: 80));
 
     // Ensure spinner shows for at least 1200ms so user can see the verb.
     final spinnerStart = DateTime.now();
@@ -568,48 +606,63 @@ class _EffectsScreenState extends State<EffectsScreen> {
   /// Uses a downsampled preview for fast interactive feedback.
   void _applyPostEffects() {
     _postEffectTimer?.cancel();
-    _postEffectTimer = Timer(const Duration(milliseconds: 150), () {
+    _postEffectTimer = Timer(const Duration(milliseconds: 300), () {
       _applyPostEffectsNow();
     });
   }
 
   void _applyPostEffectsNow() async {
-    final base = _baseFilteredImage;
-    if (base == null || _isProcessing) return;
+    // ALWAYS start from the pure filter result (no grain/leak).
+    // This prevents stacking: each toggle reapplies from the clean base.
+    final pureBase = _baseFilteredImage ?? _originalSource;
+    if (pureBase == null || _isProcessing) return;
 
     final grainI = _grainEnabled ? _grainIntensity : 0.0;
     final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
     final leakI = leakRange > 0 ? (40.0 + leakRange * 0.6) : 0.0;
 
+    // Show spinner verb while grain/leak is being applied (only when effects
+    // are actually active — no spinner for plain NONE).
+    if (grainI > 0 || leakI > 0) {
+      _startSpinner();
+    }
+
     setState(() => _isProcessing = true);
 
     try {
-      // Downsample for fast preview processing (~1000px max)
-      final preview = FilterProcessor.downsampleForPreview(base, maxDim: 1000);
-      final result = FilterProcessor.applyPostEffects(
-        preview,
-        grainIntensity: grainI,
-        lightLeakIntensity: leakI,
-        lightLeakRange: leakRange,
-        lightLeakStyle: _lightLeakStyle,
-      );
+      final Uint8List result;
+      if (grainI <= 0 && leakI <= 0) {
+        // No post-effects — use pure filter result directly.
+        result = pureBase;
+      } else {
+        result = FilterProcessor.applyPostEffects(
+          pureBase,
+          grainIntensity: grainI,
+          lightLeakIntensity: leakI,
+          lightLeakRange: leakRange,
+          lightLeakStyle: _lightLeakStyle,
+        );
+      }
 
       if (!mounted) return;
 
+      // DO NOT overwrite _baseFilteredImage — it must stay as the pure
+      // filter result so future grain/leak toggles start from clean base.
       setState(() {
         _displayImage = result;
         _isProcessing = false;
       });
 
-      // Share with BORDERS (downsampled preview is fine for borders UI)
       context.read<ImageService>().updateCurrentPhoto(result);
+      _stopSpinner();
     } catch (e) {
       debugPrint('[Effects] post-effects error: $e');
       if (!mounted) return;
       setState(() {
-        _displayImage = base;
+        _displayImage = pureBase;
         _isProcessing = false;
       });
+      _stopSpinner();
     }
   }
 
@@ -635,12 +688,10 @@ class _EffectsScreenState extends State<EffectsScreen> {
 
   void _startSpinner() {
     _spinnerTimer?.cancel();
-    _spinnerIndex = 0;
+    // Pick a single random verb for this trigger — no cycling.
+    _spinnerIndex = DateTime.now().millisecond % _spinnerVerbs.length;
     _showSpinner = true;
-    _spinnerTimer = Timer.periodic(const Duration(milliseconds: 2000), (t) {
-      if (!mounted) { t.cancel(); return; }
-      setState(() => _spinnerIndex = (_spinnerIndex + 1) % _spinnerVerbs.length);
-    });
+    setState(() {});
   }
 
   void _stopSpinner() {
@@ -691,6 +742,34 @@ class _BeforeAfterChip extends StatelessWidget {
             letterSpacing: 1.5,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Isolated spinning dot widget.
+///
+/// Extracted as a separate StatefulWidget so that parent setState() calls
+/// (which rebuild the entire tree including the spinner container) do NOT
+/// reset the CircularProgressIndicator animation. Without this isolation,
+/// the spinner appears frozen because it gets re-created every second
+/// when the verb text changes via setState.
+class _SpinningDot extends StatefulWidget {
+  const _SpinningDot();
+
+  @override
+  State<_SpinningDot> createState() => _SpinningDotState();
+}
+
+class _SpinningDotState extends State<_SpinningDot> {
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 12,
+      height: 12,
+      child: CircularProgressIndicator(
+        strokeWidth: 1.5,
+        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD89A0F)),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
+import 'app_log.dart';
 
 /// Bridge to native CoreML plugin for neural filter inference.
 ///
@@ -60,6 +61,7 @@ class CoreMLBridge {
     if (!await isAvailable) return null;
 
     try {
+      AppLog.info('CoreML', 'applyFilter: $modelName, ${imageBytes.length} bytes');
       final result = await _channel.invokeMethod<Uint8List>('applyFilter', {
         'imageBytes': imageBytes,
         'modelName': modelName,
@@ -133,9 +135,13 @@ class CoreMLBridge {
     if (!await isAvailable) return null;
 
     try {
+      AppLog.info('CoreML', 'upscalePhoto: ${imageBytes.length} bytes input');
       final result = await _channel.invokeMethod<Uint8List>('upscalePhoto', {
         'imageBytes': imageBytes,
       });
+      if (result != null) {
+        AppLog.info('CoreML', 'upscalePhoto done: ${result.length} bytes output');
+      }
       return result;
     } catch (e) {
       return null;

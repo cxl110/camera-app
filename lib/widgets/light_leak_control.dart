@@ -13,6 +13,7 @@ class LightLeakControl extends StatelessWidget {
   final ValueChanged<bool> onToggle;
   final ValueChanged<double> onIntensityChanged;
   final ValueChanged<String> onStyleChanged;
+  final String? processingVerb;
 
   const LightLeakControl({
     super.key,
@@ -22,6 +23,7 @@ class LightLeakControl extends StatelessWidget {
     required this.onToggle,
     required this.onIntensityChanged,
     required this.onStyleChanged,
+    this.processingVerb,
   });
 
   static const _styles = ['WARM', 'COOL', 'RED', 'DOUBLE'];
@@ -36,15 +38,15 @@ class LightLeakControl extends StatelessWidget {
           // Row 1: Label + Value + Switch
           Row(
             children: [
-              // Label
-              const Text(
-                'LIGHT LEAK',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              // Label + processing verb
+              if (processingVerb != null)
+                Row(children: [
+                  const Text('LIGHT LEAK', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 6),
+                  _ProcessingVerb(verb: processingVerb!),
+                ])
+              else
+                const Text('LIGHT LEAK', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
 
               const SizedBox(width: 8),
 
@@ -166,6 +168,40 @@ class _StyleChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Small animated processing verb indicator shown next to control labels.
+class _ProcessingVerb extends StatefulWidget {
+  final String verb;
+  const _ProcessingVerb({required this.verb});
+
+  @override
+  State<_ProcessingVerb> createState() => _ProcessingVerbState();
+}
+
+class _ProcessingVerbState extends State<_ProcessingVerb> {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 10, height: 10,
+          child: CircularProgressIndicator(strokeWidth: 1.2, color: Color(0xFFD89A0F)),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '${widget.verb}…',
+          style: const TextStyle(
+            color: Color(0xFFD89A0F),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ],
     );
   }
 }

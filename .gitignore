@@ -47,3 +47,8 @@ server_log.txt
 
 # Local CI artifacts
 build_artifacts/
+
+# Build outputs & test images
+*.ipa
+tools/test_upscale_*.jpg
+tools/logs_received/

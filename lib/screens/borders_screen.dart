@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/image_service.dart';
@@ -24,6 +25,7 @@ class _BordersScreenState extends State<BordersScreen> {
   bool _isSaving = false;
 
   static const _borderFiles = [
+    'NONE',          // No border — deselect
     'frame_19.png',  // 50% border
     'frame_25.png',  // 37%
     'frame_24.png',  // 36%
@@ -64,7 +66,7 @@ class _BordersScreenState extends State<BordersScreen> {
               Icon(Icons.wifi_off, size: 48,
                   color: Colors.white.withValues(alpha: 0.2)),
               const SizedBox(height: 16),
-              Text('请先连接相机WiFi',
+              Text('Please connect to camera WiFi first',
                   style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.3), fontSize: 15)),
             ],
@@ -131,17 +133,17 @@ class _BordersScreenState extends State<BordersScreen> {
           IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 22),
             onPressed: () => Navigator.pop(context),
-            tooltip: '返回',
+            tooltip: 'Back',
           ),
           const Spacer(),
           IconButton(
             icon: Icon(Icons.save_alt,
-                color: (_selectedBorder != null && imageService.currentPhoto != null && !_isSaving
+                color: (imageService.currentPhoto != null && !_isSaving
                     ? Colors.white
                     : Colors.white.withValues(alpha: 0.2)).withValues(alpha: 0.7),
                 size: 22),
-            onPressed: (_selectedBorder != null && imageService.currentPhoto != null && !_isSaving) ? _onSave : null,
-            tooltip: '保存',
+            onPressed: (imageService.currentPhoto != null && !_isSaving) ? _onSave : null,
+            tooltip: 'Save',
           ),
           IconButton(
             icon: Icon(Icons.folder_outlined,
@@ -191,7 +193,7 @@ class _BordersScreenState extends State<BordersScreen> {
                     color: Colors.white.withValues(alpha: 0.1)),
               ),
 
-            // ── Saving progress overlay ──
+            // ── Saving progress overlay (spinner only, like EFFECTS) ──
             if (_isSaving)
               Positioned.fill(
                 child: Container(
@@ -247,9 +249,10 @@ class _BordersScreenState extends State<BordersScreen> {
             addRepaintBoundaries: false,
             itemBuilder: (context, index) {
               final file = _borderFiles[index];
-              final isSelected = _selectedBorder == file;
+              final isNone = file == 'NONE';
+              final isSelected = isNone ? _selectedBorder == null : _selectedBorder == file;
               return GestureDetector(
-                onTap: () => setState(() => _selectedBorder = file),
+                onTap: () => setState(() => _selectedBorder = isNone ? null : file),
                 child: Container(
                   width: 72,
                   margin: const EdgeInsets.symmetric(horizontal: 5),
@@ -265,15 +268,20 @@ class _BordersScreenState extends State<BordersScreen> {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(5),
-                    child: Image.asset(
-                      'assets/frames/$file',
-                      fit: BoxFit.contain,
-                      cacheWidth: 144, // Downsample for thumbnail
-                      errorBuilder: (_, __, ___) => Center(
-                        child: Icon(Icons.crop_free, size: 16,
-                            color: Colors.white.withValues(alpha: 0.15)),
-                      ),
-                    ),
+                    child: isNone
+                        ? Center(
+                            child: Icon(Icons.close, size: 20,
+                                color: isSelected ? const Color(0xFFD89A0F) : Colors.white.withValues(alpha: 0.3)),
+                          )
+                        : Image.asset(
+                            'assets/frames/$file',
+                            fit: BoxFit.contain,
+                            cacheWidth: 144, // Downsample for thumbnail
+                            errorBuilder: (_, __, ___) => Center(
+                              child: Icon(Icons.crop_free, size: 16,
+                                  color: Colors.white.withValues(alpha: 0.15)),
+                            ),
+                          ),
                   ),
                 ),
               );
@@ -340,26 +348,35 @@ class _BordersScreenState extends State<BordersScreen> {
 
   void _onSave() async {
     final imageService = context.read<ImageService>();
+    // Use currentPhoto (which includes any filter effects applied in EFFECTS).
+    // Never use originalPhoto — that's the unfiltered raw capture.
     final base = imageService.currentPhoto;
-    if (base == null || _selectedBorder == null) return;
+    if (base == null) return;
 
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+    });
+
+    Uint8List? toSave;
 
     try {
-      // Composite the frame onto the photo (frame stretched, photo undistorted)
-      final bordered = await imageService.compositeBorder(base, _selectedBorder!);
-      imageService.updateCurrentPhoto(bordered);
+      // NONE selected = save the photo without any border.
+      if (_selectedBorder == null) {
+        toSave = base;
+      } else {
+        // Composite the frame onto the original photo (frame stretched, photo undistorted).
+        toSave = await imageService.compositeBorder(base, _selectedBorder!);
+      }
+      if (toSave == null) return;
 
-      final neuralClient = NeuralFilterClient();
       await imageService.saveWithUpscale(
-        bordered,
-        imageService.currentPhotoName ?? 'borders_${DateTime.now().millisecondsSinceEpoch}',
-        neuralClient: neuralClient,
+        toSave,
+        imageService.currentPhotoName ?? 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已保存 (边框: $_selectedBorder)'),
+          content: const Text('Photo saved'),
           backgroundColor: const Color(0xFF2E7D32),
           duration: const Duration(seconds: 2),
         ),
@@ -367,10 +384,14 @@ class _BordersScreenState extends State<BordersScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
       );
     } finally {
-      if (mounted) setState(() => _isSaving = false);
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
     }
   }
 }

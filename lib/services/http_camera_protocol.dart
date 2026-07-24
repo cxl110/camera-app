@@ -67,13 +67,12 @@ class HttpCameraProtocol extends CameraProtocol {
         }
       }
     } catch (_) {
-      // Not connected
+      // Transient failure — don't emit a disconnect event.
+      // The caller should treat this as "unknown", not "disconnected".
+      AppLog.debug('HttpCam', 'Connection check timed out — keeping previous state');
     }
 
-    final status = const ConnectionStatus(connected: false);
-    AppLog.debug('HttpCam', 'Connection check failed — not connected');
-    _emitStatus(status);
-    return status;
+    return _lastStatus ?? const ConnectionStatus(connected: false);
   }
 
   void _emitStatus(ConnectionStatus status) {
@@ -257,12 +256,12 @@ class HttpCameraProtocol extends CameraProtocol {
   @override
   Future<void> stopLiveView() async {
     _liveViewRunning = false;
-    // Cancel the HTTP response stream immediately so the async loop exits.
-    _liveViewResponse?.cancel();
-    _liveViewResponse = null;
     // Close the stream controller if still open.
     _liveViewController?.close();
     _liveViewController = null;
+    // Discard the HTTP response reference; the async loop will exit
+    // on the next _liveViewRunning check.
+    _liveViewResponse = null;
     AppLog.info('HttpCam', 'Live view stopped');
   }
 
@@ -379,9 +378,9 @@ class HttpCameraProtocol extends CameraProtocol {
       // Sort: newest first (filename contains YYYYMMDD_HHMMSS, lexicographic = chronological)
       files.sort((a, b) => b.name.compareTo(a.name));
 
-      // Build CameraPhoto list — fetch thumbnails concurrently (max 6 at a time)
+      // Build CameraPhoto list — fetch thumbnails concurrently (max 8 at a time)
       final photos = <CameraPhoto>[];
-      final semaphore = _Semaphore(6);
+      final semaphore = _Semaphore(8);
 
       await Future.wait(files.map((entry) async {
         await semaphore.acquire();
@@ -513,7 +512,6 @@ class HttpCameraProtocol extends CameraProtocol {
   void dispose() {
     _connectionCtrl.close();
     _liveViewRunning = false;
-    _liveViewResponse?.cancel();
     _liveViewResponse = null;
     _liveViewController?.close();
     _liveViewController = null;

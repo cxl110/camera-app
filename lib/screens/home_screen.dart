@@ -7,6 +7,7 @@ import '../services/camera_protocol.dart';
 import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/app_log.dart';
+import '../services/log_uploader.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
@@ -66,23 +67,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Listen for connection status changes
     _connectionSub = _protocol.connectionStream.listen((status) {
       if (!mounted) return;
+      final wasConnected = _isConnected;
       setState(() {
         _isConnected = status.connected;
         _cameraModel = status.cameraBrand;
         if (_isConnected) {
           AppLog.info('Home', 'Camera connected: $_cameraModel');
           _isVerifying = false;
-          _startLiveView();
           _syncTimeIfNeeded();
+          // Only start live view if we were NOT already connected.
+          if (!wasConnected) _startLiveView();
         } else {
           _stopLiveView();
         }
       });
     });
 
-    // Initial check
-    await _retryConnection();
-    // If still not connected after initial check, show WiFi guide
+    // Initial check — retry a few times before showing WiFi guide.
+    var attempts = 0;
+    while (!_isConnected && attempts < 3) {
+      await _retryConnection();
+      attempts++;
+      if (!_isConnected && attempts < 3) {
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    }
     if (!mounted) return;
     if (!_isConnected) {
       _showWiFiGuide();
@@ -104,7 +113,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _syncTimeIfNeeded();
       }
     } catch (_) {
-      // Silent retry — don't show WiFi guide on resume
+      // Silent retry — don't change connection state on transient failures.
+      // The connectionStream listener will handle genuine disconnects.
     }
   }
 
@@ -129,26 +139,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             Icon(Icons.wifi_find, color: Color(0xFFD89A0F), size: 24),
             SizedBox(width: 10),
-            Text('连接相机WiFi', style: TextStyle(color: Colors.white, fontSize: 16)),
+            Text('Connect to Camera WiFi', style: TextStyle(color: Colors.white, fontSize: 16)),
           ],
         ),
         content: const Text(
-          '请先在系统设置中连接相机WiFi热点：\n\n'
-          'SSID: ZIVIGo\n密码: zivi2025\n\n'
-          '连接成功后返回APP即可自动识别。',
+          'Please connect to the camera WiFi hotspot:\n\n'
+          'SSID: ZIVIGo\nPassword: zivi2025\n\n'
+          'Return to the app after connecting.',
           style: TextStyle(color: Colors.white60, fontSize: 14, height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              // Open system WiFi settings
               try {
                 const MethodChannel('com.cameraapp/system')
                     .invokeMethod('openWiFiSettings');
               } catch (_) {}
             },
-            child: const Text('打开设置', style: TextStyle(color: Color(0xFFD89A0F))),
+            child: const Text('Settings', style: TextStyle(color: Color(0xFFD89A0F))),
           ),
           FilledButton(
             onPressed: () {
@@ -158,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF2D5BD8),
             ),
-            child: const Text('已连接，重新检测'),
+            child: const Text('Re-check'),
           ),
         ],
       ),
@@ -167,31 +176,86 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // ── Live View ──
 
+  // Debounce: if already started within last 500ms, skip.
+  Timer? _startLiveViewTimer;
+  bool _liveViewActive = false;
+  int _liveViewRetryCount = 0;
+  static const _maxLiveViewRetries = 3;
+
   void _startLiveView() {
-    _stopLiveView();
+    _startLiveViewTimer?.cancel();
+    _startLiveViewTimer = Timer(const Duration(milliseconds: 100), () {
+      _doStartLiveView();
+    });
+  }
+
+  void _doStartLiveView() {
+    if (_liveViewActive) return;
+    // Only attempt if we believe the camera is connected.
+    if (!_isConnected) {
+      AppLog.info('Home', 'Skipping live view start — not connected');
+      return;
+    }
+    // Stop any previous stream cleanly, then start a new one.
+    _liveViewActive = false;
+    _liveViewStream = null;
+    try { _protocol.stopLiveView(); } catch (_) {}
+
+    _liveViewActive = true;
+    _liveViewRetryCount = 0;
     AppLog.info('Home', 'Starting live view...');
 
     try {
       _liveViewStream = _protocol.startLiveView();
-      // Reconnect on error after delay
+      // MUST call setState so CameraPreview gets the new stream reference.
+      // Without this, the widget tree still holds the old (closed) stream
+      // and the preview stays blank.
+      setState(() {});
+
       _liveViewStream!.listen(
         null,
         onError: (e) {
           debugPrint('[HomeScreen] live view error: $e');
-          Future.delayed(const Duration(seconds: 3), () {
-            if (mounted && _isConnected) _startLiveView();
-          });
+          _liveViewActive = false;
+          _liveViewRetryCount++;
+          if (_liveViewRetryCount <= _maxLiveViewRetries && mounted && _isConnected) {
+            final delay = Duration(seconds: 2 * _liveViewRetryCount);
+            AppLog.info('Home', 'Live view error, retry $_liveViewRetryCount in ${delay.inSeconds}s');
+            Future.delayed(delay, () {
+              if (mounted && _isConnected && !_liveViewActive) _startLiveView();
+            });
+          }
         },
         onDone: () {
           debugPrint('[HomeScreen] live view ended');
+          _liveViewActive = false;
+          // If the stream ended unexpectedly while we think we're connected,
+          // try to restart it.
+          if (mounted && _isConnected) {
+            AppLog.info('Home', 'Live view stream ended, restarting...');
+            _startLiveView();
+          }
         },
       );
     } catch (e) {
+      _liveViewActive = false;
       debugPrint('[HomeScreen] failed to start live view: $e');
+      _liveViewRetryCount++;
+      if (_liveViewRetryCount <= _maxLiveViewRetries && mounted && _isConnected) {
+        final delay = Duration(seconds: 2 * _liveViewRetryCount);
+        Future.delayed(delay, () {
+          if (mounted && _isConnected && !_liveViewActive) _startLiveView();
+        });
+      }
     }
   }
 
   void _stopLiveView() {
+    _startLiveViewTimer?.cancel();
+    if (_liveViewActive) {
+      AppLog.info('Home', 'Stopping live view (was active)');
+    }
+    _liveViewActive = false;
     _liveViewStream = null;
     try {
       _protocol.stopLiveView();
@@ -246,7 +310,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (_isConnected) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('已连接 $_cameraModel'),
+                    content: Text('Connected $_cameraModel'),
                     backgroundColor: const Color(0xFF1A1A2E),
                     duration: const Duration(seconds: 1),
                   ),
@@ -263,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 WifiIndicator(isConnected: _isConnected),
                 const SizedBox(width: 6),
                 Text(
-                  _isConnected ? '已连接' : (_isVerifying ? '检测中...' : '未连接'),
+                  _isConnected ? 'Connected' : (_isVerifying ? 'Checking...' : 'Disconnected'),
                   style: TextStyle(
                     color: _isConnected
                         ? const Color(0xFF4CAF50)
@@ -276,6 +340,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const Spacer(),
+          // 上传日志按钮
+          IconButton(
+            onPressed: _onUploadLogs,
+            icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
+            tooltip: 'Upload Logs',
+          ),
           IconButton(
             onPressed: _isConnected ? _onOpenGallery : null,
             icon: Icon(
@@ -283,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               color: Colors.white.withValues(alpha: _isConnected ? 0.7 : 0.2),
               size: 22,
             ),
-            tooltip: '相机照片',
+            tooltip: 'Camera Photos',
           ),
         ],
       ),
@@ -300,6 +370,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_isConnected) _startLiveView();
   }
 
+  void _onUploadLogs() async {
+    // 1. Show current PC IP or prompt to set it.
+    final currentIp = await LogUploader.getPcIp();
+
+    if (!mounted) return;
+    final ip = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _IpInputDialog(currentIp: currentIp),
+    );
+
+    if (ip == null || !mounted) return; // cancelled
+
+    // 2. Save IP for next time.
+    await LogUploader.setPcIp(ip);
+
+    // 3. Upload.
+    try {
+      final msg = await LogUploader.uploadLogs(pcIp: ip);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: const Color(0xFF2E7D32)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Upload failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   DateTime _lastCaptureTime = DateTime(2000);
 
   void _onShutterPressed() async {
@@ -313,7 +416,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final result = await _protocol.capturePhoto();
       if (!mounted) return;
 
-      final bytes = result.thumbnail ?? result.fullImage;
+      // Use fullImage (12MP) as the shared photo. Thumbnail is too small.
+      final bytes = result.fullImage ?? result.thumbnail;
       if (bytes != null) {
         context.read<ImageService>().loadPhoto(bytes, name: result.name);
       }
@@ -331,7 +435,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('拍照失败: $e'),
+          content: Text('Capture failed: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -342,14 +446,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (tab == 'EFFECTS') {
       _stopLiveView();
       _navigateTo(EffectsScreen(wifiConnected: _isConnected)).then((_) {
-        if (_isConnected) _startLiveView();
+        // Always try to restart — connection events will keep it alive if connected.
+        _startLiveView();
       });
       return;
     }
     if (tab == 'BORDERS') {
       _stopLiveView();
       _navigateTo(BordersScreen(wifiConnected: _isConnected)).then((_) {
-        if (_isConnected) _startLiveView();
+        _startLiveView();
       });
       return;
     }
@@ -360,6 +465,87 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => page),
+    );
+  }
+}
+
+/// Simple dialog to enter PC IP address for log upload.
+class _IpInputDialog extends StatefulWidget {
+  final String currentIp;
+  const _IpInputDialog({required this.currentIp});
+
+  @override
+  State<_IpInputDialog> createState() => _IpInputDialogState();
+}
+
+class _IpInputDialogState extends State<_IpInputDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.currentIp);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A2E),
+      title: const Row(
+        children: [
+          Icon(Icons.bug_report, color: Color(0xFFD89A0F), size: 22),
+          SizedBox(width: 10),
+          Text('Upload Logs to PC',
+              style: TextStyle(color: Colors.white, fontSize: 16)),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Make sure log_receiver.py is running on PC.\n'
+            'Phone and PC must be on the same network.',
+            style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _ctrl,
+            style: const TextStyle(color: Colors.white, fontSize: 15),
+            decoration: InputDecoration(
+              labelText: 'PC IP Address',
+              hintText: 'e.g. 192.168.1.114',
+              labelStyle: const TextStyle(color: Colors.white38),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
+              enabledBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.white24),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFFD89A0F)),
+              ),
+            ),
+            keyboardType: TextInputType.url,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF2D5BD8),
+          ),
+          child: const Text('Upload'),
+        ),
+      ],
     );
   }
 }

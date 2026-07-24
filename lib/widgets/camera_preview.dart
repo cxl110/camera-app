@@ -67,7 +67,7 @@ class CameraPreview extends StatelessWidget {
           Icon(Icons.camera, size: 48, color: Colors.white38),
           SizedBox(height: 8),
           Text(
-            '实时取景',
+            'Live View',
             style: TextStyle(color: Colors.white38, fontSize: 13),
           ),
         ],
@@ -87,7 +87,7 @@ class CameraPreview extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            '相机未连接',
+            'Camera Disconnected',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.3),
               fontSize: 14,
@@ -96,7 +96,7 @@ class CameraPreview extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '请连接相机WiFi开始拍摄',
+            'Connect to camera WiFi to start',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.15),
               fontSize: 12,
