@@ -473,11 +473,8 @@ class _EffectsScreenState extends State<EffectsScreen> {
     if (base == null) return;
     debugPrint('[Effects] Saving: base image ${base.length} bytes');
 
-    // Show saving indicator IMMEDIATELY — before any synchronous computation.
+    // Show saving indicator IMMEDIATELY.
     setState(() => _isSaving = true);
-
-    // Let the UI render the spinner for at least one frame before blocking work.
-    await Future.delayed(const Duration(milliseconds: 50));
 
     final grainI = _grainEnabled ? _grainIntensity : 0.0;
     final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
@@ -487,10 +484,14 @@ class _EffectsScreenState extends State<EffectsScreen> {
     if (grainI <= 0 && leakI <= 0) {
       output = base;
     } else {
-      output = FilterProcessor.applyPostEffects(
-        base, grainIntensity: grainI, lightLeakIntensity: leakI,
-        lightLeakRange: leakRange, lightLeakStyle: _lightLeakStyle,
-      );
+      // Run in isolate so UI thread is not blocked — saving spinner animates smoothly.
+      output = await compute(FilterProcessor.applyPostEffectsIsolate, {
+        'input': base,
+        'grainIntensity': grainI,
+        'lightLeakIntensity': leakI,
+        'lightLeakRange': leakRange,
+        'lightLeakStyle': _lightLeakStyle,
+      });
     }
 
     try {

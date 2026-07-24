@@ -82,11 +82,27 @@ class ImageService extends ChangeNotifier {
   /// The photo itself is not resized or distorted. The frame is stretched to
   /// match the photo dimensions and then alpha-blended on top.
   Future<Uint8List> compositeBorder(Uint8List photoBytes, String frameFileName) async {
+    // Read the frame asset on the main thread (isolate can't access rootBundle).
+    final frameData = await rootBundle.load('assets/frames/$frameFileName');
+    final frameBytes = frameData.buffer.asUint8List();
+
+    // Run the heavy decode/resize/composite/encode in an isolate so the
+    // saving spinner animates smoothly.
+    return compute(_compositeBorderIsolate, {
+      'photo': photoBytes,
+      'frame': frameBytes,
+    });
+  }
+
+  /// Isolate entry: stretch frame to photo dimensions and alpha-blend.
+  static Uint8List _compositeBorderIsolate(Map<String, dynamic> params) {
+    final photoBytes = params['photo'] as Uint8List;
+    final frameBytes = params['frame'] as Uint8List;
+
     final photo = img.decodeImage(photoBytes);
     if (photo == null) return photoBytes;
 
-    final frameData = await rootBundle.load('assets/frames/$frameFileName');
-    final frame = img.decodePng(frameData.buffer.asUint8List());
+    final frame = img.decodePng(frameBytes);
     if (frame == null) return photoBytes;
 
     // Stretch frame to photo dimensions (frame may be distorted/cropped).
@@ -123,12 +139,14 @@ class ImageService extends ChangeNotifier {
       AppLog.info('ImageService', 'Upscale input: ${imageBytes.length} bytes');
       try {
         final coremlUpscaled = await CoreMLBridge.upscalePhoto(imageBytes: imageBytes);
-        if (coremlUpscaled != null && !_isAllBlack(coremlUpscaled)) {
+        // Lanczos upscale is reliable — just check output is not empty.
+        // No need for the expensive _isAllBlack decode check (that was for EDSR).
+        if (coremlUpscaled != null && coremlUpscaled.length > 1000) {
           AppLog.info('ImageService',
               'Upscale done: ${imageBytes.length}B → ${coremlUpscaled.length}B');
           finalBytes = coremlUpscaled;
         } else {
-          AppLog.error('ImageService', 'Upscale returned null or all-black');
+          AppLog.error('ImageService', 'Upscale returned null or tiny output');
         }
       } catch (e) {
         AppLog.error('ImageService', 'Upscale failed, fallback to original', e);
@@ -165,28 +183,6 @@ class ImageService extends ChangeNotifier {
 
     notifyListeners();
     return file;
-  }
-
-  /// Quick check if JPEG bytes decode to a near-black image.
-  bool _isAllBlack(Uint8List bytes) {
-    try {
-      final image = img.decodeImage(bytes);
-      if (image == null) return true;
-      // Sample the center pixel + 4 corners
-      final w = image.width;
-      final h = image.height;
-      final samples = [
-        image.getPixel(w ~/ 2, h ~/ 2),
-        image.getPixel(0, 0),
-        image.getPixel(w - 1, 0),
-        image.getPixel(0, h - 1),
-        image.getPixel(w - 1, h - 1),
-      ];
-      // If all samples are very dark (< 10), treat as black
-      return samples.every((p) => p.r < 10 && p.g < 10 && p.b < 10);
-    } catch (_) {
-      return true;
-    }
   }
 
   /// Save an edited (filtered) image (without upscale).
