@@ -10,7 +10,6 @@ class GrainControl extends StatelessWidget {
   final double intensity;
   final ValueChanged<bool> onToggle;
   final ValueChanged<double> onIntensityChanged;
-  final String? processingVerb;
 
   const GrainControl({
     super.key,
@@ -18,7 +17,6 @@ class GrainControl extends StatelessWidget {
     required this.intensity,
     required this.onToggle,
     required this.onIntensityChanged,
-    this.processingVerb,
   });
 
   @override
@@ -31,15 +29,15 @@ class GrainControl extends StatelessWidget {
           // Row 1: Label + Value + Switch
           Row(
             children: [
-              // Label + processing verb
-              if (processingVerb != null)
-                Row(children: [
-                  const Text('GRAIN', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
-                  const SizedBox(width: 6),
-                  _ProcessingVerb(verb: processingVerb!),
-                ])
-              else
-                const Text('GRAIN', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+              // Label
+              const Text(
+                'GRAIN',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
 
               const SizedBox(width: 8),
 
@@ -90,40 +88,6 @@ class GrainControl extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Small animated processing verb indicator shown next to control labels.
-class _ProcessingVerb extends StatefulWidget {
-  final String verb;
-  const _ProcessingVerb({required this.verb});
-
-  @override
-  State<_ProcessingVerb> createState() => _ProcessingVerbState();
-}
-
-class _ProcessingVerbState extends State<_ProcessingVerb> {
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(
-          width: 10, height: 10,
-          child: CircularProgressIndicator(strokeWidth: 1.2, color: Color(0xFFD89A0F)),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          '${widget.verb}…',
-          style: const TextStyle(
-            color: Color(0xFFD89A0F),
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      ],
     );
   }
 }

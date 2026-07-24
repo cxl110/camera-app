@@ -219,12 +219,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
                   GrainControl(
                     enabled: _grainEnabled,
                     intensity: _grainIntensity,
-                    processingVerb: _showSpinner ? _spinnerVerbs[_spinnerIndex] : null,
                     onToggle: (v) {
                       setState(() => _grainEnabled = v);
                       context.read<ImageService>().grainEnabled = v;
-                      // Show spinner immediately when turning grain ON
-                      if (v) _startSpinner();
                       _applyPostEffects();
                     },
                     onIntensityChanged: (v) {
@@ -241,12 +238,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
                     enabled: _lightLeakEnabled,
                     intensity: _lightLeakIntensity,
                     selectedStyle: _lightLeakStyle,
-                    processingVerb: _showSpinner ? _spinnerVerbs[_spinnerIndex] : null,
                     onToggle: (v) {
                       setState(() => _lightLeakEnabled = v);
                       context.read<ImageService>().lightLeakEnabled = v;
-                      // Show spinner immediately when turning leak ON
-                      if (v) _startSpinner();
                       _applyPostEffects();
                     },
                     onIntensityChanged: (v) {
@@ -621,10 +615,13 @@ class _EffectsScreenState extends State<EffectsScreen> {
     final leakRange = _lightLeakEnabled ? _lightLeakIntensity : 0.0;
     final leakI = leakRange > 0 ? (40.0 + leakRange * 0.6) : 0.0;
 
-    // Show spinner verb while grain/leak is being applied (only when effects
-    // are actually active — no spinner for plain NONE).
+    // Show spinner verb in preview area while grain/leak is being applied.
+    // Only show when effects are actually active — no spinner for plain NONE.
     if (grainI > 0 || leakI > 0) {
       _startSpinner();
+      // Let the UI render the spinner for at least one frame before the
+      // synchronous computation blocks the thread.
+      await Future.delayed(const Duration(milliseconds: 30));
     }
 
     setState(() => _isProcessing = true);
