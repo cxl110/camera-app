@@ -95,10 +95,10 @@ class HttpCameraProtocol extends CameraProtocol {
           return status;
         }
       }
-    } catch (_) {
+    } catch (e) {
       // Transient failure — don't emit a disconnect event.
       // The caller should treat this as "unknown", not "disconnected".
-      AppLog.debug('HttpCam', 'Connection check timed out — keeping previous state');
+      AppLog.info('HttpCam', 'Connection check failed: $e');
     }
 
     return _lastStatus ?? const ConnectionStatus(connected: false);
