@@ -125,16 +125,19 @@ class HttpCameraProtocol extends CameraProtocol {
     if (_isConnected) return; // already running
     _isConnected = true;
 
-    // Sync RTC immediately on connection
-    syncRtc();
+    // Sync RTC FIRST, then start heartbeat.
+    // Token is time-based — if camera RTC is wrong (e.g. 1970),
+    // heartbeat with our token will be rejected (403).
+    syncRtc().then((_) {
+      // Send first heartbeat after RTC sync completes
+      _sendHeartbeat();
+    });
 
     // Heartbeat every 30 seconds (honeypot — must carry token)
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _sendHeartbeat();
     });
-    // Send first heartbeat immediately
-    _sendHeartbeat();
 
     // RTC sync every 3 minutes (keeps token window valid)
     _rtcSyncTimer?.cancel();
@@ -164,7 +167,11 @@ class HttpCameraProtocol extends CameraProtocol {
       final response = await _client.send(request).timeout(const Duration(seconds: 3));
       // Drain the response body
       await response.stream.drain();
-      AppLog.info('HttpCam', 'Heartbeat OK (token=$token, HTTP ${response.statusCode})');
+      if (response.statusCode == 200) {
+        AppLog.info('HttpCam', 'Heartbeat OK (token=$token)');
+      } else {
+        AppLog.info('HttpCam', 'Heartbeat REJECTED (token=$token, HTTP ${response.statusCode})');
+      }
     } catch (e) {
       AppLog.info('HttpCam', 'Heartbeat FAILED (token=$token): $e');
     }
@@ -523,16 +530,20 @@ class HttpCameraProtocol extends CameraProtocol {
   /// Get thumbnail bytes for a photo filename.
   Future<Uint8List?> _getThumbnailBytes(String filename) async {
     try {
-      AppLog.info('HttpCam', 'getThumbnail: $filename (token=${_computeToken()})');
+      final token = _computeToken();
+      AppLog.info('HttpCam', 'getThumbnail: $filename (token=$token)');
       final response = await _client
-          .get(Uri.parse('$baseUrl/thumb/$filename'), headers: _authHeaders)
+          .get(Uri.parse('$baseUrl/thumb/$filename'), headers: {'User-Agent': 'ZIVIGo/1.0 ($token)'})
           .timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
+        AppLog.info('HttpCam', 'getThumbnail OK: $filename (${response.bodyBytes.length} bytes)');
         return response.bodyBytes;
+      } else {
+        AppLog.info('HttpCam', 'getThumbnail FAILED: $filename (HTTP ${response.statusCode})');
       }
     } catch (e) {
-      debugPrint('[HttpCamera] thumbnail error for $filename: $e');
+      AppLog.info('HttpCam', 'getThumbnail ERROR: $filename: $e');
     }
     return null;
   }
