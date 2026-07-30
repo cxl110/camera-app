@@ -67,6 +67,8 @@ class ConnectionStatus {
   final int? signalStrength; // 0-3
   final String? cameraBrand;
   final String? cameraModel;
+  final String? fwVersion; // Firmware version, e.g. "V0.5-20260729"
+  final bool? otaSupported; // Whether device supports WiFi OTA update
 
   const ConnectionStatus({
     required this.connected,
@@ -74,6 +76,8 @@ class ConnectionStatus {
     this.signalStrength,
     this.cameraBrand,
     this.cameraModel,
+    this.fwVersion,
+    this.otaSupported,
   });
 }
 
@@ -133,4 +137,29 @@ class DownloadProgress {
   double get percent => total > 0 ? received / total : 0.0;
 
   const DownloadProgress({required this.received, required this.total});
+}
+
+// ── OTA Firmware Update ──
+
+/// OTA update status.
+enum OtaStatus {
+  idle, // No update in progress
+  uploading, // Firmware image being uploaded
+  flashing, // Device is flashing firmware
+  rebooting, // Device is rebooting after flash
+  done, // Update completed successfully
+  failed, // Update failed
+}
+
+/// OTA progress event emitted during firmware update.
+class OtaProgress {
+  final OtaStatus status;
+  final double percent; // 0.0 ~ 1.0 (upload progress only, 1.0 when done)
+  final String? error;
+
+  const OtaProgress({
+    required this.status,
+    this.percent = 0.0,
+    this.error,
+  });
 }

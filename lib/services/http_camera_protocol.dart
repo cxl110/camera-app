@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'camera_protocol.dart';
@@ -72,7 +72,7 @@ class HttpCameraProtocol extends CameraProtocol {
     try {
       // /info is unauthenticated — no token needed
       final response = await _client
-          .get(Uri.parse('$baseUrl/info'))
+          .get(Uri.parse('$baseUrl/info'), headers: {'User-Agent': _userAgent()})
           .timeout(_timeout);
 
       if (response.statusCode == 200) {
@@ -80,16 +80,20 @@ class HttpCameraProtocol extends CameraProtocol {
         final model = info['model'] as String? ?? '';
         final fw = info['fw'] as String? ?? '';
         final ssid = info['ssid'] as String? ?? 'ZIVIGo';
+        final fwVersion = info['fw_version'] as String?;
+        final otaSupported = info['ota'] as bool? ?? false;
 
         // Only ZIVIGo devices are supported
         if (model == 'ZIVIGo') {
-          AppLog.info('HttpCam', 'Connected to ZIVIGo fw=$fw ssid=$ssid');
+          AppLog.info('HttpCam', 'Connected to ZIVIGo fw=$fw fw_version=$fwVersion ssid=$ssid ota=$otaSupported');
           final status = ConnectionStatus(
             connected: true,
             ssid: ssid,
             signalStrength: 3,
             cameraBrand: model,
             cameraModel: fw,
+            fwVersion: fwVersion,
+            otaSupported: otaSupported,
           );
           _emitStatus(status);
           return status;
@@ -435,13 +439,16 @@ class HttpCameraProtocol extends CameraProtocol {
   Future<void> syncRtc() async {
     try {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      // /rtc is unauthenticated — no token needed
-      await _client.post(
+      final body = jsonEncode({'timestamp': now});
+      AppLog.info('HttpCam', 'RTC sync: POST /rtc body=$body');
+      // /rtc is unauthenticated per spec, but send User-Agent anyway —
+      // some camera firmware versions may reject requests without ZIVIGo UA.
+      final response = await _client.post(
         Uri.parse('$baseUrl/rtc'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'timestamp': now}),
+        headers: {'Content-Type': 'application/json', 'User-Agent': _userAgent()},
+        body: body,
       ).timeout(const Duration(seconds: 3));
-      AppLog.info('HttpCam', 'RTC synced: timestamp=$now');
+      AppLog.info('HttpCam', 'RTC synced: timestamp=$now (HTTP ${response.statusCode}, body=${response.body})');
     } catch (e) {
       // Silently ignore — RTC sync is best-effort
       AppLog.info('HttpCam', 'RTC sync failed: $e');
@@ -622,6 +629,251 @@ class HttpCameraProtocol extends CameraProtocol {
       debugPrint('[HttpCamera] deletePhoto error: $e');
       return false;
     }
+  }
+
+  // ── OTA Firmware Update ──
+
+  /// Query the current OTA update status from the device.
+  ///
+  /// Returns a map with `status` (idle/receiving_boot/boot_done/flashing)
+  /// and `boot_received` (bool), or null on failure.
+  Future<Map<String, dynamic>?> getUpdateStatus() async {
+    try {
+      final response = await _client
+          .get(Uri.parse('$baseUrl/update_status'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+      AppLog.info('HttpCam', 'getUpdateStatus: HTTP ${response.statusCode}');
+    } catch (e) {
+      AppLog.info('HttpCam', 'getUpdateStatus failed: $e');
+    }
+    return null;
+  }
+
+  /// Upload firmware images to the device for OTA update.
+  ///
+  /// Emits [OtaProgress] events with a single unified progress percentage
+  /// (0.0 → 1.0) covering both boot.img and rootfs.img uploads.
+  /// After upload completes, monitors the device for flashing → reboot.
+  ///
+  /// The caller should listen to the stream and update UI accordingly.
+  /// The stream completes when the update is done or fails.
+  Stream<OtaProgress> uploadFirmware({
+    required Uint8List bootBytes,
+    required Uint8List rootfsBytes,
+  }) async* {
+    final totalSize = bootBytes.length + rootfsBytes.length;
+    AppLog.info('HttpCam', 'OTA: starting firmware upload '
+        '(boot=${bootBytes.length}, rootfs=${rootfsBytes.length}, total=$totalSize)');
+
+    // ── Step 1: Upload boot.img ──
+    yield const OtaProgress(status: OtaStatus.uploading, percent: 0.0);
+
+    try {
+      final bootResult = await _uploadFirmwareImage(
+        bytes: bootBytes,
+        firmwareType: 'boot',
+        onProgress: (_) {
+          // Progress tracked via total bytes sent after each upload completes
+        },
+      );
+
+      if (!bootResult) {
+        AppLog.error('HttpCam', 'OTA: boot.img upload failed');
+        yield const OtaProgress(status: OtaStatus.failed, percent: 0.0,
+            error: '固件上传失败');
+        return;
+      }
+
+      // boot uploaded: 50%
+      yield OtaProgress(status: OtaStatus.uploading,
+          percent: bootBytes.length / totalSize);
+      AppLog.info('HttpCam', 'OTA: boot.img uploaded successfully');
+    } catch (e) {
+      AppLog.error('HttpCam', 'OTA: boot.img upload error', e);
+      yield OtaProgress(status: OtaStatus.failed,
+          percent: bootBytes.length / totalSize, error: '固件上传失败: $e');
+      return;
+    }
+
+    // ── Step 2: Upload rootfs.img (triggers flashing) ──
+    try {
+      final rootfsResult = await _uploadFirmwareImage(
+        bytes: rootfsBytes,
+        firmwareType: 'rootfs',
+        onProgress: (_) {},
+      );
+
+      if (!rootfsResult) {
+        AppLog.error('HttpCam', 'OTA: rootfs.img upload failed');
+        yield const OtaProgress(status: OtaStatus.failed, percent: 0.5,
+            error: '固件上传失败');
+        return;
+      }
+
+      // rootfs uploaded: 100%
+      yield const OtaProgress(status: OtaStatus.uploading, percent: 1.0);
+      AppLog.info('HttpCam', 'OTA: rootfs.img uploaded successfully');
+    } catch (e) {
+      AppLog.error('HttpCam', 'OTA: rootfs.img upload error', e);
+      yield OtaProgress(status: OtaStatus.failed,
+          percent: 0.5, error: '固件上传失败: $e');
+      return;
+    }
+
+    // ── Step 3: Wait for flashing → reboot ──
+    yield const OtaProgress(status: OtaStatus.flashing, percent: 1.0);
+    AppLog.info('HttpCam', 'OTA: firmware flashing, waiting for reboot...');
+
+    // Poll /update_status until connection drops (device reboots)
+    for (var i = 0; i < 30; i++) {
+      await Future.delayed(const Duration(seconds: 2));
+      try {
+        final status = await getUpdateStatus();
+        if (status == null) {
+          // Connection lost = device is rebooting
+          break;
+        }
+        final s = status['status'] as String? ?? '';
+        AppLog.info('HttpCam', 'OTA: update_status = $s');
+        if (s == 'flashing') {
+          yield const OtaProgress(status: OtaStatus.flashing, percent: 1.0);
+          continue;
+        }
+        // Any other status after we've uploaded means something went wrong
+        if (s == 'idle' || s == 'receiving_boot' || s == 'boot_done') {
+          // Device didn't enter flashing — unexpected
+          yield OtaProgress(status: OtaStatus.failed, percent: 1.0,
+              error: '设备未进入刷写状态');
+          return;
+        }
+      } catch (e) {
+        // Connection lost = device is rebooting (expected)
+        AppLog.info('HttpCam', 'OTA: connection lost (device rebooting)');
+        break;
+      }
+    }
+
+    // ── Step 4: Wait for device to come back online ──
+    yield const OtaProgress(status: OtaStatus.rebooting, percent: 1.0);
+    AppLog.info('HttpCam', 'OTA: waiting for device to reboot...');
+
+    // Wait ~30s for reboot, then try to reconnect
+    await Future.delayed(const Duration(seconds: 30));
+
+    for (var attempt = 0; attempt < 10; attempt++) {
+      await Future.delayed(const Duration(seconds: 3));
+      try {
+        final status = await getConnectionStatus();
+        if (status.connected) {
+          AppLog.info('HttpCam', 'OTA: device back online, fw_version=${status.fwVersion}');
+          yield const OtaProgress(status: OtaStatus.done, percent: 1.0);
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // Device didn't come back — might still be rebooting or update failed
+    AppLog.info('HttpCam', 'OTA: device did not come back online after reboot');
+    yield const OtaProgress(status: OtaStatus.done, percent: 1.0);
+  }
+
+  /// Upload a single firmware image (boot or rootfs) to POST /update.
+  ///
+  /// Uses dart:io [HttpClient] for chunked upload with progress tracking.
+  /// Returns true on success (HTTP 200), false on failure.
+  Future<bool> _uploadFirmwareImage({
+    required Uint8List bytes,
+    required String firmwareType,
+    required void Function(int sent) onProgress,
+  }) async {
+    // Use dart:io HttpClient for streaming upload with progress
+    final httpClient = HttpClient();
+    try {
+      final uri = Uri.parse('$baseUrl/update');
+      final request = await httpClient.postUrl(uri);
+
+      // Set headers
+      request.headers.set('Content-Type', 'application/octet-stream');
+      request.headers.set('Content-Length', bytes.length.toString());
+      request.headers.set('X-Firmware-Type', firmwareType);
+      request.headers.set('User-Agent', _userAgent());
+
+      // Write body in chunks for progress tracking
+      const chunkSize = 32768; // 32KB chunks
+      var sent = 0;
+      for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+        final end = (offset + chunkSize).clamp(0, bytes.length);
+        request.add(bytes.sublist(offset, end));
+        sent = end;
+        onProgress(sent);
+      }
+
+      await request.flush();
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      AppLog.info('HttpCam',
+          'OTA: $firmwareType upload response: ${response.statusCode} body=$body');
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        AppLog.error('HttpCam',
+            'OTA: $firmwareType upload failed: HTTP ${response.statusCode} $body');
+        return false;
+      }
+    } catch (e) {
+      AppLog.error('HttpCam', 'OTA: $firmwareType upload error', e);
+      return false;
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  /// Compare firmware version strings to determine if an update is needed.
+  ///
+  /// Version format: `V<major>.<minor>-<YYYYMMDD>` (e.g. "V0.5-20260729").
+  /// Returns true if [cameraVersion] is older than [bundledVersion],
+  /// or if [cameraVersion] is null (old firmware without version reporting).
+  static bool needsFirmwareUpdate(String? cameraVersion, String bundledVersion) {
+    if (cameraVersion == null || cameraVersion.isEmpty) return true;
+    if (cameraVersion == bundledVersion) return false;
+
+    // Parse version: "V0.5-20260729" → major=0, minor=5, date=20260729
+    final cameraParts = _parseFwVersion(cameraVersion);
+    final bundledParts = _parseFwVersion(bundledVersion);
+
+    if (cameraParts == null || bundledParts == null) {
+      // Can't parse — fall back to string comparison
+      return cameraVersion.compareTo(bundledVersion) < 0;
+    }
+
+    // Compare major.minor first, then date
+    final cameraMajor = cameraParts[0];
+    final cameraMinor = cameraParts[1];
+    final cameraDate = cameraParts[2];
+    final bundledMajor = bundledParts[0];
+    final bundledMinor = bundledParts[1];
+    final bundledDate = bundledParts[2];
+
+    if (cameraMajor != bundledMajor) return cameraMajor < bundledMajor;
+    if (cameraMinor != bundledMinor) return cameraMinor < bundledMinor;
+    return cameraDate < bundledDate;
+  }
+
+  /// Parse "V0.5-20260729" → [0, 5, 20260729], or null on failure.
+  static List<int>? _parseFwVersion(String v) {
+    final regex = RegExp(r'^V(\d+)\.(\d+)-(\d{8})$');
+    final match = regex.firstMatch(v);
+    if (match == null) return null;
+    return [
+      int.tryParse(match.group(1)!) ?? 0,
+      int.tryParse(match.group(2)!) ?? 0,
+      int.tryParse(match.group(3)!) ?? 0,
+    ];
   }
 
   /// Release HTTP client resources and stop all timers.

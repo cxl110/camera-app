@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
+import '../services/http_camera_protocol.dart';
+import '../services/firmware_service.dart';
 import '../services/image_service.dart';
 import '../services/app_log.dart';
 import '../services/log_uploader.dart';
@@ -11,6 +12,7 @@ import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
 import '../widgets/bottom_tabs.dart';
+import '../widgets/ota_update_dialog.dart';
 import 'effects_screen.dart';
 import 'borders_screen.dart';
 import 'gallery_screen.dart';
@@ -28,6 +30,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isVerifying = true;
   String _activeTab = 'CAMERA';
   String? _cameraModel;
+
+  // OTA firmware update state
+  String? _cameraFwVersion;
+  bool _otaSupported = false;
+  bool _firmwareUpdateAvailable = false;
+  final FirmwareService _firmwareService = FirmwareService();
 
   StreamSubscription<ConnectionStatus>? _connectionSub;
   Stream<Uint8List>? _liveViewStream;
@@ -70,14 +78,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _isConnected = status.connected;
         _cameraModel = status.cameraBrand;
+        _cameraFwVersion = status.fwVersion;
+        _otaSupported = status.otaSupported ?? false;
         if (_isConnected) {
-          AppLog.info('Home', 'Camera connected: $_cameraModel');
+          AppLog.info('Home', 'Camera connected: $_cameraModel fw=$_cameraFwVersion ota=$_otaSupported');
           _isVerifying = false;
           // RTC sync handled by HttpCameraProtocol internally
           // Only start live view if we were NOT already connected.
           if (!wasConnected) _startLiveView();
+          // Check for firmware update
+          if (_otaSupported) _checkFirmwareUpdate();
         } else {
           _stopLiveView();
+          _firmwareUpdateAvailable = false;
         }
       });
     });
@@ -105,10 +118,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _isConnected = status.connected;
         _cameraModel = status.cameraBrand;
+        _cameraFwVersion = status.fwVersion;
+        _otaSupported = status.otaSupported ?? false;
         _isVerifying = false;
       });
       if (status.connected && !wasConnected) {
         _startLiveView();
+        if (_otaSupported) _checkFirmwareUpdate();
       }
     } catch (_) {
       // Silent retry — don't change connection state on transient failures.
@@ -118,6 +134,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // RTC sync is now handled internally by HttpCameraProtocol
   // (auto-syncs on connection + every 3 minutes)
+
+  // ── Firmware Update ──
+
+  Future<void> _checkFirmwareUpdate() async {
+    final hasFw = await _firmwareService.hasFirmware();
+    if (!hasFw || !mounted) return;
+
+    final manifest = _firmwareService.manifest;
+    if (manifest == null) return;
+
+    final needsUpdate = _firmwareService.needsUpdate(_cameraFwVersion);
+    AppLog.info('Home', 'Firmware check: camera=$_cameraFwVersion '
+        'bundled=${manifest.version} needsUpdate=$needsUpdate');
+
+    if (needsUpdate && mounted) {
+      setState(() => _firmwareUpdateAvailable = true);
+    }
+  }
+
+  void _onFirmwareUpdate() async {
+    final manifest = _firmwareService.manifest;
+    if (manifest == null) return;
+
+    final protocol = _protocol;
+    if (protocol is! HttpCameraProtocol) return;
+
+    final result = await OtaUpdateDialog.show(
+      context,
+      cameraVersion: _cameraFwVersion,
+      bundledVersion: manifest.version,
+      protocol: protocol,
+      firmwareService: _firmwareService,
+    );
+
+    if (result == true && mounted) {
+      // Update succeeded — re-check connection to get new fw_version
+      setState(() => _firmwareUpdateAvailable = false);
+      await _retryConnection();
+    }
+  }
 
   void _showWiFiGuide() {
     if (!mounted) return;
@@ -299,9 +355,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             behavior: HitTestBehavior.opaque,
             onTap: () {
               if (_isConnected) {
+                final fwInfo = _cameraFwVersion != null ? ' fw=$_cameraFwVersion' : '';
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Connected $_cameraModel'),
+                    content: Text('Connected $_cameraModel$fwInfo'),
                     backgroundColor: const Color(0xFF1A1A2E),
                     duration: const Duration(seconds: 1),
                   ),
@@ -331,6 +388,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const Spacer(),
+          // Firmware update button
+          if (_firmwareUpdateAvailable)
+            IconButton(
+              onPressed: _onFirmwareUpdate,
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.system_update, color: Color(0xFFD89A0F), size: 20),
+                  // Red dot badge
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF44336),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              tooltip: '固件更新',
+            ),
           // 上传日志按钮
           IconButton(
             onPressed: _onUploadLogs,
@@ -362,32 +444,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onUploadLogs() async {
-    // 1. Show current PC IP or prompt to set it.
-    final currentIp = await LogUploader.getPcIp();
-
-    if (!mounted) return;
-    final ip = await showDialog<String>(
-      context: context,
-      builder: (ctx) => _IpInputDialog(currentIp: currentIp),
-    );
-
-    if (ip == null || !mounted) return; // cancelled
-
-    // 2. Save IP for next time.
-    await LogUploader.setPcIp(ip);
-
-    // 3. Upload.
     try {
-      final msg = await LogUploader.uploadLogs(pcIp: ip);
+      // 1. Show current PC IP or prompt to set it.
+      final currentIp = await LogUploader.getPcIp();
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: const Color(0xFF2E7D32)),
+      final ip = await showDialog<String>(
+        context: context,
+        builder: (ctx) => _IpInputDialog(currentIp: currentIp),
       );
+
+      if (ip == null || ip.isEmpty || !mounted) return; // cancelled
+
+      // 2. Save IP for next time.
+      await LogUploader.setPcIp(ip);
+
+      // 3. Show uploading indicator.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('正在上传日志...'),
+          backgroundColor: Color(0xFF1A1A2E),
+          duration: Duration(seconds: 1),
+        ),
+      );
+
+      // 4. Upload.
+      try {
+        final msg = await LogUploader.uploadLogs(pcIp: ip);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: const Color(0xFF2E7D32)),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('上传失败: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
+      // e.g. SharedPreferences not initialized
       if (!mounted) return;
+      AppLog.error('Home', 'Upload logs failed to start', e);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Upload failed: $e'),
+          content: Text('无法打开日志上传: $e'),
           backgroundColor: Colors.red,
         ),
       );
