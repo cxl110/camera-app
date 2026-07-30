@@ -1,6 +1,29 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- WiFi 相机通信 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
+
+    <!-- 相机（未来直拍功能） -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- 存储：保存照片（Android 10 以下用旧权限，13+ 用细分权限） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+
+    <!-- EXIF 位置信息 -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION"/>
+
+    <!-- 快门触感反馈 -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
     <application
-        android:label="camera_app"
+        android:label="相机伴侣"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

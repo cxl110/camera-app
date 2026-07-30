@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
-import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
@@ -163,9 +163,18 @@ class ImageService extends ChangeNotifier {
 
     // Also save to system photo gallery so it shows in Photos.app
     try {
-      await ImageGallerySaver.saveImage(finalBytes);
-    } catch (_) {
-      // Non-fatal — file is still saved to local storage
+      final hasAccess = await Gal.hasAccess(toAlbum: false);
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess(toAlbum: false);
+        if (!granted) {
+          AppLog.error('ImageService', 'Gallery access denied — photo saved to app storage only');
+          return file;
+        }
+      }
+      await Gal.putImageBytes(finalBytes, name: name);
+      AppLog.info('ImageService', 'Saved to system gallery: $name');
+    } catch (e) {
+      AppLog.error('ImageService', 'Gallery save failed (file still in local storage)', e);
     }
 
     _recentEdits.insert(

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.camera_app"
+    namespace = "com.zivigo.cameraapp"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,14 +15,17 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.camera_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        applicationId = "com.zivigo.cameraapp"
+        // minSdk 24: TFLite GPU delegate + NNAPI delegate 硬件加速要求
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    // .tflite 模型文件不压缩，保证 TFLite 可内存映射加载
+    androidResources {
+        noCompress += "tflite"
     }
 
     buildTypes {
@@ -32,6 +35,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+// TFLite 硬件加速依赖（GPU delegate + NNAPI delegate）
+dependencies {
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 }
 
 kotlin {

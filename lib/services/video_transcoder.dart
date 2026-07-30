@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:gal/gal.dart';
 import 'app_log.dart';
 
 /// Bridge to the native iOS VideoTranscoder plugin.
@@ -49,8 +49,8 @@ class VideoTranscoder {
           '${result['frameCount']} frames, ${result['fps']} fps');
 
       // 3. Save MP4 to system photo library.
-      final saveResult = await ImageGallerySaver.saveFile(mp4Path);
-      AppLog.info('VideoTranscoder', 'Save result: $saveResult');
+      await Gal.putVideo(mp4Path);
+      AppLog.info('VideoTranscoder', 'Saved to gallery');
 
       // 4. Clean up temp files.
       try {

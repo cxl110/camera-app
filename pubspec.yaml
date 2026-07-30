@@ -31,7 +31,7 @@ dependencies:
   connectivity_plus: ^6.1.0
 
   # Gallery save (system photo library)
-  image_gallery_saver: ^2.0.3
+  gal: ^2.3.0
 
   # Sharing logs / files via system share sheet
   share_plus: ^10.1.4
@@ -66,6 +66,7 @@ flutter:
     - assets/models/
     - assets/frames/
     - assets/film_presets/
+    - assets/firmware/
 
 flutter_launcher_icons:
   ios: true
