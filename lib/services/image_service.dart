@@ -130,7 +130,13 @@ class ImageService extends ChangeNotifier {
   /// By default applies x2 CoreML super-resolution before saving (3MP → 12MP).
   /// The APP UI always works with downsampled previews; full upscale only
   /// happens at save time.
-  Future<File> saveWithUpscale(Uint8List imageBytes, String originalName,
+  ///
+  /// The photo is always written to the app's local `edited/` storage first
+  /// (so it's never silently lost), then a copy is pushed to the iOS Photos
+  /// library via the `gal` plugin. The returned [SaveResult] distinguishes
+  /// the two so the UI can report honestly whether the photo reached the
+  /// system gallery (what the user means by "saved").
+  Future<SaveResult> saveWithUpscale(Uint8List imageBytes, String originalName,
       {NeuralFilterClient? neuralClient, bool upscale = true}) async {
     Uint8List finalBytes = imageBytes;
 
@@ -161,20 +167,29 @@ class ImageService extends ChangeNotifier {
     final file = File(outputPath);
     await file.writeAsBytes(finalBytes);
 
-    // Also save to system photo gallery so it shows in Photos.app
+    // Push a copy to the system photo gallery so it shows in Photos.app.
+    // If this fails (plugin not registered, permission denied, disk full…)
+    // the photo is still safely in app storage, but we report gallery=false
+    // so the UI doesn't claim success.
+    var gallerySaved = false;
+    String? galleryError;
     try {
       final hasAccess = await Gal.hasAccess(toAlbum: false);
       if (!hasAccess) {
         final granted = await Gal.requestAccess(toAlbum: false);
         if (!granted) {
-          AppLog.error('ImageService', 'Gallery access denied — photo saved to app storage only');
-          return file;
+          galleryError = 'Gallery permission denied';
+          AppLog.error('ImageService', 'Gallery access denied — photo in app storage only');
         }
       }
-      await Gal.putImageBytes(finalBytes, name: name);
-      AppLog.info('ImageService', 'Saved to system gallery: $name');
+      if (galleryError == null) {
+        await Gal.putImageBytes(finalBytes, name: name);
+        gallerySaved = true;
+        AppLog.info('ImageService', 'Saved to system gallery: $name');
+      }
     } catch (e) {
-      AppLog.error('ImageService', 'Gallery save failed (file still in local storage)', e);
+      galleryError = 'Gallery save failed: $e';
+      AppLog.error('ImageService', 'Gallery save failed (photo still in app storage)', e);
     }
 
     _recentEdits.insert(
@@ -191,7 +206,11 @@ class ImageService extends ChangeNotifier {
     }
 
     notifyListeners();
-    return file;
+    return SaveResult(
+      file: file,
+      gallerySaved: gallerySaved,
+      error: galleryError,
+    );
   }
 
   /// Save an edited (filtered) image (without upscale).
@@ -275,5 +294,22 @@ class _EditedImage {
     required this.path,
     required this.originalName,
     required this.editedAt,
+  });
+}
+
+/// Result of saving a photo via [ImageService.saveWithUpscale].
+///
+/// The photo is always written to app-local storage ([file]); [gallerySaved]
+/// tells whether a copy also made it into the iOS Photos library (what the
+/// user sees as "saved"). When [gallerySaved] is false, [error] explains why.
+class SaveResult {
+  final File file;
+  final bool gallerySaved;
+  final String? error;
+
+  const SaveResult({
+    required this.file,
+    required this.gallerySaved,
+    this.error,
   });
 }

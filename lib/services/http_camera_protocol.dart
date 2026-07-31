@@ -41,6 +41,24 @@ class HttpCameraProtocol extends CameraProtocol {
   Timer? _rtcSyncTimer;
   bool _isConnected = false;
 
+  // ── Disconnect detection ──
+  /// Consecutive /info failures while we believed the camera was connected.
+  /// A single transient failure is ignored; 2+ in a row → emit disconnect.
+  int _connectionFailStreak = 0;
+
+  // ── HTTP concurrency cap ──
+  /// Global limit on simultaneous in-flight HTTP connections to the camera.
+  /// The ZIVIGo dev board's HTTP server has a very low concurrency ceiling:
+  /// under more than ~4 simultaneous connections it starts dropping/closing
+  /// them ("Connection reset by peer", "Connection closed before full header
+  /// was received"), which manifests as a cascade of thumbnail failures. So
+  /// the cap is deliberately small (4) — every outbound request acquires a
+  /// slot here and releases it when the response is consumed. The live-view
+  /// MJPEG stream holds a slot for its whole lifetime, leaving 3 for short
+  /// requests while the preview is running.
+  static const _maxHttpConcurrency = 4;
+  final _httpSlots = _Semaphore(_maxHttpConcurrency);
+
   HttpCameraProtocol({String? baseUrl, http.Client? client})
       : baseUrl = (baseUrl ?? _defaultBaseUrl).replaceAll(RegExp(r'/$'), ''),
         _client = client ?? http.Client();
@@ -65,15 +83,27 @@ class HttpCameraProtocol extends CameraProtocol {
   /// HTTP headers for authenticated requests.
   Map<String, String> get _authHeaders => {'User-Agent': _userAgent()};
 
+  /// Run a short HTTP request under the global concurrency cap. Acquires a
+  /// slot, runs [fn] (which must consume/complete the request and return its
+  /// result), and always releases the slot.
+  Future<T> _withSlot<T>(Future<T> Function() fn) async {
+    await _httpSlots.acquire();
+    try {
+      return await fn();
+    } finally {
+      _httpSlots.release();
+    }
+  }
+
   // ── Connection ──
 
   @override
   Future<ConnectionStatus> getConnectionStatus() async {
     try {
       // /info is unauthenticated — no token needed
-      final response = await _client
+      final response = await _withSlot(() => _client
           .get(Uri.parse('$baseUrl/info'), headers: {'User-Agent': _userAgent()})
-          .timeout(_timeout);
+          .timeout(_timeout));
 
       if (response.statusCode == 200) {
         final info = jsonDecode(response.body) as Map<String, dynamic>;
@@ -86,6 +116,8 @@ class HttpCameraProtocol extends CameraProtocol {
         // Only ZIVIGo devices are supported
         if (model == 'ZIVIGo') {
           AppLog.info('HttpCam', 'Connected to ZIVIGo fw=$fw fw_version=$fwVersion ssid=$ssid ota=$otaSupported');
+          // Camera answered — reset the failure streak.
+          _connectionFailStreak = 0;
           final status = ConnectionStatus(
             connected: true,
             ssid: ssid,
@@ -100,12 +132,27 @@ class HttpCameraProtocol extends CameraProtocol {
         }
       }
     } catch (e) {
-      // Transient failure — don't emit a disconnect event.
-      // The caller should treat this as "unknown", not "disconnected".
+      // Transient failure — don't emit a disconnect on the first blip.
+      // But if we previously believed we were connected and /info keeps
+      // failing, the camera has genuinely gone away → emit disconnect so
+      // the UI stops hammering a dead device and live view stops retrying.
       AppLog.info('HttpCam', 'Connection check failed: $e');
+      _maybeEmitDisconnect();
     }
 
     return _lastStatus ?? const ConnectionStatus(connected: false);
+  }
+
+  /// Track consecutive /info failures and emit a disconnect once the camera
+  /// is clearly gone (2 failures in a row). The first failure is tolerated to
+  /// avoid flapping on a momentary network blip.
+  void _maybeEmitDisconnect() {
+    if (!_isConnected) return; // already disconnected — nothing to do
+    _connectionFailStreak++;
+    if (_connectionFailStreak >= 2) {
+      AppLog.info('HttpCam', 'Camera unreachable after $_connectionFailStreak consecutive checks → disconnect');
+      _emitStatus(const ConnectionStatus(connected: false));
+    }
   }
 
   void _emitStatus(ConnectionStatus status) {
@@ -115,6 +162,7 @@ class HttpCameraProtocol extends CameraProtocol {
 
       // Start/stop security timers based on connection state
       if (status.connected) {
+        _connectionFailStreak = 0;
         _startSecurityTimers();
       } else {
         _stopSecurityTimers();
@@ -163,21 +211,34 @@ class HttpCameraProtocol extends CameraProtocol {
   }
 
   /// Send honeypot heartbeat with token.
+  ///
+  /// The heartbeat is the ground-truth signal that the camera is alive: the
+  /// token only validates on a running camera, so a refused/failed heartbeat
+  /// means the device is gone. On failure while we think we're connected,
+  /// emit a disconnect so the UI stops retrying against a dead camera.
   Future<void> _sendHeartbeat() async {
     final token = _computeToken();
     try {
       final request = http.Request('GET', Uri.parse('$baseUrl/heartbeat'));
       request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
-      final response = await _client.send(request).timeout(const Duration(seconds: 3));
+      final response = await _withSlot(() =>
+          _client.send(request).timeout(const Duration(seconds: 3)));
       // Drain the response body
       await response.stream.drain();
       if (response.statusCode == 200) {
         AppLog.info('HttpCam', 'Heartbeat OK (token=$token)');
+        _connectionFailStreak = 0; // camera is alive — reset streak
       } else {
         AppLog.info('HttpCam', 'Heartbeat REJECTED (token=$token, HTTP ${response.statusCode})');
+        // Rejected (likely 403) = camera is up but token wrong; not a disconnect.
       }
     } catch (e) {
       AppLog.info('HttpCam', 'Heartbeat FAILED (token=$token): $e');
+      // Connection refused / no route → camera is unreachable. This is the
+      // definitive "camera gone" signal that the silent /info failure path
+      // might miss during the 30s heartbeat gap. Emit disconnect immediately.
+      _emitStatus(const ConnectionStatus(connected: false));
+      _stopSecurityTimers();
     }
   }
 
@@ -199,6 +260,9 @@ class HttpCameraProtocol extends CameraProtocol {
     _liveViewRunning = true;
 
     () async {
+      // Hold a concurrency slot for the entire lifetime of the MJPEG stream
+      // so the live view counts against the global HTTP cap.
+      await _httpSlots.acquire();
       try {
         final request = http.Request('GET', Uri.parse('$baseUrl/stream'));
         // Stream is authenticated — token checked at connection start only
@@ -334,6 +398,7 @@ class HttpCameraProtocol extends CameraProtocol {
           controller.close();
         }
         _liveViewController = null;
+        _httpSlots.release();
       }
     }();
 
@@ -386,9 +451,9 @@ class HttpCameraProtocol extends CameraProtocol {
     // POST /capture — trigger photo capture, returns {status, filename}
     // API spec: capture is synchronous, up to ~2.5s blocking. Use 10s to be safe.
     AppLog.info('HttpCam', 'Sending capture request (token=${_computeToken()})...');
-    final capResponse = await _client
+    final capResponse = await _withSlot(() => _client
         .post(Uri.parse('$baseUrl/capture'), headers: _authHeaders)
-        .timeout(const Duration(seconds: 10));
+        .timeout(const Duration(seconds: 10)));
 
     AppLog.info('HttpCam',
         'Capture response: HTTP ${capResponse.statusCode}, body=${capResponse.body}');
@@ -443,11 +508,11 @@ class HttpCameraProtocol extends CameraProtocol {
       AppLog.info('HttpCam', 'RTC sync: POST /rtc body=$body');
       // /rtc is unauthenticated per spec, but send User-Agent anyway —
       // some camera firmware versions may reject requests without ZIVIGo UA.
-      final response = await _client.post(
+      final response = await _withSlot(() => _client.post(
         Uri.parse('$baseUrl/rtc'),
         headers: {'Content-Type': 'application/json', 'User-Agent': _userAgent()},
         body: body,
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 3)));
       AppLog.info('HttpCam', 'RTC synced: timestamp=$now (HTTP ${response.statusCode}, body=${response.body})');
     } catch (e) {
       // Silently ignore — RTC sync is best-effort
@@ -471,9 +536,9 @@ class HttpCameraProtocol extends CameraProtocol {
           'limit': limit.toString(),
         },
       );
-      final response = await _client
+      final response = await _withSlot(() => _client
           .get(uri, headers: _authHeaders)
-          .timeout(_timeout);
+          .timeout(_timeout));
 
       if (response.statusCode != 200) {
         return const PhotoListResult(total: 0, offset: 0, limit: 0, photos: []);
@@ -491,31 +556,27 @@ class HttpCameraProtocol extends CameraProtocol {
       // Sort: newest first (filename contains YYYYMMDD_HHMMSS, lexicographic = chronological)
       files.sort((a, b) => b.name.compareTo(a.name));
 
-      // Build CameraPhoto list — fetch thumbnails concurrently (max 8 at a time)
+      // Build CameraPhoto list — fetch thumbnails concurrently. Per-request
+      // concurrency is bounded by the global HTTP slot cap (_maxHttpConcurrency)
+      // via _getThumbnailBytes → _withSlot, so no separate semaphore is needed.
       final photos = <CameraPhoto>[];
-      final semaphore = _Semaphore(8);
 
       await Future.wait(files.map((entry) async {
-        await semaphore.acquire();
+        Uint8List? thumbnail;
+        // v1.5: thumbnails supported for both photos and videos.
+        // For videos the server extracts the first MJPEG frame.
         try {
-          Uint8List? thumbnail;
-          // v1.5: thumbnails supported for both photos and videos.
-          // For videos the server extracts the first MJPEG frame.
-          try {
-            thumbnail = await _getThumbnailBytes(entry.name);
-          } catch (_) {}
+          thumbnail = await _getThumbnailBytes(entry.name);
+        } catch (_) {}
 
-          photos.add(CameraPhoto(
-            id: entry.name,
-            name: entry.name,
-            sizeBytes: entry.size,
-            timestamp: entry.mtime,
-            thumbnail: thumbnail,
-            fullImage: null, // full image loaded on demand
-          ));
-        } finally {
-          semaphore.release();
-        }
+        photos.add(CameraPhoto(
+          id: entry.name,
+          name: entry.name,
+          sizeBytes: entry.size,
+          timestamp: entry.mtime,
+          thumbnail: thumbnail,
+          fullImage: null, // full image loaded on demand
+        ));
       }));
 
       // Sort results by name descending (newest first)
@@ -536,21 +597,37 @@ class HttpCameraProtocol extends CameraProtocol {
 
   /// Get thumbnail bytes for a photo filename.
   Future<Uint8List?> _getThumbnailBytes(String filename) async {
-    try {
-      final token = _computeToken();
-      AppLog.info('HttpCam', 'getThumbnail: $filename (token=$token)');
-      final response = await _client
-          .get(Uri.parse('$baseUrl/thumb/$filename'), headers: {'User-Agent': 'ZIVIGo/1.0 ($token)'})
-          .timeout(const Duration(seconds: 5));
+    // Retry transient connection failures (the dev board resets connections
+    // under concurrency). Don't retry a definitive HTTP error like 500 (the
+    // camera returned an answer — for .avi thumbnails it means the firmware
+    // can't extract a frame; retrying won't help).
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final token = _computeToken();
+        AppLog.info('HttpCam',
+            'getThumbnail: $filename (token=$token${attempt > 1 ? ", retry $attempt" : ""})');
+        final response = await _withSlot(() => _client
+            .get(Uri.parse('$baseUrl/thumb/$filename'), headers: {'User-Agent': 'ZIVIGo/1.0 ($token)'})
+            .timeout(const Duration(seconds: 5)));
 
-      if (response.statusCode == 200) {
-        AppLog.info('HttpCam', 'getThumbnail OK: $filename (${response.bodyBytes.length} bytes)');
-        return response.bodyBytes;
-      } else {
+        if (response.statusCode == 200) {
+          AppLog.info('HttpCam', 'getThumbnail OK: $filename (${response.bodyBytes.length} bytes)');
+          return response.bodyBytes;
+        }
+        // Non-200 = server answered. For 500 (e.g. video thumbnails the firmware
+        // can't render) there's nothing to retry — bail out.
         AppLog.info('HttpCam', 'getThumbnail FAILED: $filename (HTTP ${response.statusCode})');
+        return null;
+      } catch (e) {
+        AppLog.info('HttpCam', 'getThumbnail ERROR: $filename: $e');
+        // Transient (connection reset/closed/timeout) → retry after a short
+        // backoff so the slot pool drains a bit before we try again.
+        if (attempt < maxAttempts) {
+          await Future.delayed(Duration(milliseconds: 200 * attempt));
+          continue;
+        }
       }
-    } catch (e) {
-      AppLog.info('HttpCam', 'getThumbnail ERROR: $filename: $e');
     }
     return null;
   }
@@ -563,9 +640,11 @@ class HttpCameraProtocol extends CameraProtocol {
   @override
   Stream<DownloadProgress> downloadPhoto(String photoId,
       {PhotoQuality quality = PhotoQuality.original}) async* {
+    final token = _computeToken();
+    AppLog.info('HttpCam', 'downloadPhoto (stream): $photoId (token=$token)');
+    // Hold a concurrency slot across the whole streamed download.
+    await _httpSlots.acquire();
     try {
-      final token = _computeToken();
-      AppLog.info('HttpCam', 'downloadPhoto (stream): $photoId (token=$token)');
       final request = http.Request('GET', Uri.parse('$baseUrl/file/$photoId'));
       request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
       final response = await _client.send(request).timeout(const Duration(seconds: 60));
@@ -596,6 +675,8 @@ class HttpCameraProtocol extends CameraProtocol {
       AppLog.error('HttpCam', 'downloadPhoto error', e);
       debugPrint('[HttpCamera] downloadPhoto error: $e');
       rethrow;
+    } finally {
+      _httpSlots.release();
     }
   }
 
@@ -603,9 +684,9 @@ class HttpCameraProtocol extends CameraProtocol {
   Future<Uint8List?> downloadPhotoBytes(String photoId) async {
     try {
       AppLog.info('HttpCam', 'downloadPhoto: $photoId (token=${_computeToken()})');
-      final response = await _client
+      final response = await _withSlot(() => _client
           .get(Uri.parse('$baseUrl/file/$photoId'), headers: _authHeaders)
-          .timeout(const Duration(seconds: 60));
+          .timeout(const Duration(seconds: 60)));
 
       if (response.statusCode == 200) {
         return response.bodyBytes;
@@ -620,9 +701,9 @@ class HttpCameraProtocol extends CameraProtocol {
   Future<bool> deletePhoto(String photoId) async {
     try {
       AppLog.info('HttpCam', 'deletePhoto: $photoId (token=${_computeToken()})');
-      final response = await _client
+      final response = await _withSlot(() => _client
           .delete(Uri.parse('$baseUrl/file/$photoId'), headers: _authHeaders)
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 5)));
 
       return response.statusCode == 200;
     } catch (e) {
@@ -639,9 +720,9 @@ class HttpCameraProtocol extends CameraProtocol {
   /// and `boot_received` (bool), or null on failure.
   Future<Map<String, dynamic>?> getUpdateStatus() async {
     try {
-      final response = await _client
+      final response = await _withSlot(() => _client
           .get(Uri.parse('$baseUrl/update_status'), headers: _authHeaders)
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 5)));
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
@@ -791,6 +872,8 @@ class HttpCameraProtocol extends CameraProtocol {
   }) async {
     // Use dart:io HttpClient for streaming upload with progress
     final httpClient = HttpClient();
+    // Account for this upload against the global HTTP concurrency cap.
+    await _httpSlots.acquire();
     try {
       final uri = Uri.parse('$baseUrl/update');
       final request = await httpClient.postUrl(uri);
@@ -830,6 +913,7 @@ class HttpCameraProtocol extends CameraProtocol {
       return false;
     } finally {
       httpClient.close();
+      _httpSlots.release();
     }
   }
 

@@ -180,6 +180,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
     await Future.delayed(const Duration(milliseconds: 150));
 
     final imageService = context.read<ImageService>();
+    var gallerySavedCount = 0;
+    var galleryFailedCount = 0;
     for (var i = 0; i < selected.length; i++) {
       if (!mounted) return;
       setState(() { _downloadIndex = i; _currentProgress = 0.0; });
@@ -193,19 +195,44 @@ class _GalleryScreenState extends State<GalleryScreen> {
         if (bytes == null) continue;
         if (isVideo) {
           setState(() => _currentProgress = 0.3);
-          await VideoTranscoder.transcodeAndSave(aviBytes: bytes, name: photo.name);
+          final savedPath = await VideoTranscoder.transcodeAndSave(
+              aviBytes: bytes, name: photo.name);
+          if (savedPath != null) {
+            gallerySavedCount++;
+          } else {
+            galleryFailedCount++;
+          }
         } else {
           setState(() => _currentProgress = 0.5);
-          await imageService.saveWithUpscale(bytes, photo.name);
+          final result = await imageService.saveWithUpscale(bytes, photo.name);
+          if (result.gallerySaved) {
+            gallerySavedCount++;
+          } else {
+            galleryFailedCount++;
+          }
         }
-      } catch (_) {}
+      } catch (_) {
+        galleryFailedCount++;
+      }
       setState(() => _currentProgress = 1.0);
     }
 
     if (!mounted) return;
     setState(() { _downloading = false; _selectMode = false; _selectedIds.clear(); });
+    String msg;
+    Color color;
+    if (galleryFailedCount == 0) {
+      msg = 'Saved $gallerySavedCount to gallery';
+      color = const Color(0xFF2E7D32);
+    } else if (gallerySavedCount == 0) {
+      msg = 'Gallery save failed';
+      color = Colors.red;
+    } else {
+      msg = 'Saved $gallerySavedCount, $galleryFailedCount failed gallery';
+      color = const Color(0xFFD89A0F);
+    }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Saved'), backgroundColor: Color(0xFF2E7D32)),
+      SnackBar(content: Text(msg), backgroundColor: color),
     );
   }
 
@@ -351,10 +378,29 @@ class _GalleryScreenState extends State<GalleryScreen> {
       child: Stack(fit: StackFit.expand, children: [
         if (photo.thumbnail != null)
           Image.memory(photo.thumbnail!, fit: BoxFit.cover)
+        else if (isVideo)
+          // Video whose preview frame the camera firmware couldn't render
+          // (it returns HTTP 500 for .avi thumbnails). Show a clear "video,
+          // no preview" placeholder instead of a generic image icon, so users
+          // don't think a photo failed to load.
+          Container(
+            color: const Color(0xFF12121F),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.movie, color: const Color(0xFFD89A0F).withValues(alpha: 0.9), size: 36),
+                  const SizedBox(height: 6),
+                  const Text('Video',
+                    style: TextStyle(color: Colors.white38, fontSize: 11)),
+                ],
+              ),
+            ),
+          )
         else
           Container(color: const Color(0xFF1A1A2E),
             child: Center(child: Icon(
-              isVideo ? Icons.videocam : Icons.image,
+              Icons.image,
               color: Colors.white.withValues(alpha: 0.2), size: 32))),
         if (isVideo)
           Positioned(bottom: 4, right: 4,

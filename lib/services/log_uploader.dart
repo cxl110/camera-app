@@ -1,28 +1,49 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
 
 /// Uploads APP logs to a PC-side log receiver via HTTP POST.
 ///
 /// PC 端运行 `python tools/log_receiver.py`，监听 0.0.0.0:8080。
 /// 手机必须和 PC 在同一网络（不是相机 WiFi）。
+///
+/// PC IP 持久化到一个本地 json 文件（Documents/log_uploader.json），
+/// 不依赖 shared_preferences，避免插件 channel 问题。
 class LogUploader {
-  static const _keyPcIp = 'log_uploader_pc_ip';
   static const _port = 8080;
   static const _timeout = Duration(seconds: 10);
+  static const _configFileName = 'log_uploader.json';
+  static const _keyPcIp = 'pc_ip';
+
+  /// 配置文件路径（Documents 目录下）。
+  static Future<File> _configFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/$_configFileName');
+  }
 
   /// 获取保存的 PC IP 地址。
   static Future<String> getPcIp() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyPcIp) ?? '';
+    try {
+      final file = await _configFile();
+      if (!await file.exists()) return '';
+      final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      return (json[_keyPcIp] as String?) ?? '';
+    } catch (e) {
+      AppLog.error('LogUploader', '读取 PC IP 失败', e);
+      return '';
+    }
   }
 
   /// 保存 PC IP 地址。
   static Future<void> setPcIp(String ip) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyPcIp, ip);
+    try {
+      final file = await _configFile();
+      await file.writeAsString(jsonEncode({_keyPcIp: ip}));
+    } catch (e) {
+      AppLog.error('LogUploader', '保存 PC IP 失败', e);
+    }
   }
 
   /// 上传所有日志到 PC。

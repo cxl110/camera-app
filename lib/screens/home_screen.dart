@@ -40,6 +40,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription<ConnectionStatus>? _connectionSub;
   Stream<Uint8List>? _liveViewStream;
 
+  // Reconnect watchdog: when disconnected, poll /info every few seconds so the
+  // app recovers automatically when the camera comes back (no need for the
+  // user to foreground the app).
+  Timer? _reconnectWatchdog;
+
   CameraProtocol get _protocol => context.read<CameraProtocol>();
 
   @override
@@ -53,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectionSub?.cancel();
+    _reconnectWatchdog?.cancel();
     _stopLiveView();
     super.dispose();
   }
@@ -60,9 +66,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Only re-check connection if we were previously connected.
-      // Don't show WiFi guide on resume — just silently retry.
-      _retryConnection();
+      // App back to foreground. Re-check connection; if still connected, make
+      // sure live view is running (it may have been stopped on pause).
+      _retryConnection().then((_) {
+        if (mounted && _isConnected && !_liveViewActive) {
+          _startLiveView();
+        }
+      });
     } else if (state == AppLifecycleState.paused) {
       _stopLiveView();
     }
@@ -74,7 +84,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Listen for connection status changes
     _connectionSub = _protocol.connectionStream.listen((status) {
       if (!mounted) return;
-      final wasConnected = _isConnected;
       setState(() {
         _isConnected = status.connected;
         _cameraModel = status.cameraBrand;
@@ -83,16 +92,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (_isConnected) {
           AppLog.info('Home', 'Camera connected: $_cameraModel fw=$_cameraFwVersion ota=$_otaSupported');
           _isVerifying = false;
-          // RTC sync handled by HttpCameraProtocol internally
-          // Only start live view if we were NOT already connected.
-          if (!wasConnected) _startLiveView();
+          // Fresh connection → reset the live-view retry budget.
+          _liveViewRetryCount = 0;
+          // (Re)start live view whenever the camera (re)connects — the
+          // stream from a previous session is stale/closed.
+          _startLiveView();
           // Check for firmware update
           if (_otaSupported) _checkFirmwareUpdate();
         } else {
+          AppLog.info('Home', 'Camera disconnected');
           _stopLiveView();
           _firmwareUpdateAvailable = false;
         }
       });
+
+      // Manage the reconnect watchdog: run it only while disconnected.
+      if (status.connected) {
+        _reconnectWatchdog?.cancel();
+        _reconnectWatchdog = null;
+      } else {
+        _ensureReconnectWatchdog();
+      }
     });
 
     // Initial check — retry a few times before showing WiFi guide.
@@ -107,24 +127,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     if (!_isConnected) {
       _showWiFiGuide();
+      _ensureReconnectWatchdog();
     }
+  }
+
+  /// Start (or keep running) the periodic reconnect poll while disconnected.
+  void _ensureReconnectWatchdog() {
+    if (_reconnectWatchdog != null && _reconnectWatchdog!.isActive) return;
+    _reconnectWatchdog = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!_isConnected) _retryConnection();
+    });
   }
 
   Future<void> _retryConnection() async {
     try {
       final status = await _protocol.getConnectionStatus();
       if (!mounted) return;
-      final wasConnected = _isConnected;
-      setState(() {
-        _isConnected = status.connected;
-        _cameraModel = status.cameraBrand;
-        _cameraFwVersion = status.fwVersion;
-        _otaSupported = status.otaSupported ?? false;
-        _isVerifying = false;
-      });
-      if (status.connected && !wasConnected) {
-        _startLiveView();
+      // Only act on a transition into connected here; the connectionStream
+      // listener handles live-view start/stop and watchdog management.
+      // (getConnectionStatus emits status changes internally.)
+      if (status.connected) {
+        setState(() {
+          _isConnected = status.connected;
+          _cameraModel = status.cameraBrand;
+          _cameraFwVersion = status.fwVersion;
+          _otaSupported = status.otaSupported ?? false;
+          _isVerifying = false;
+        });
         if (_otaSupported) _checkFirmwareUpdate();
+        // Live view start is handled by the connectionStream listener, but
+        // guard against the no-op emit case (already connected → no event).
+        if (!_liveViewActive) {
+          _liveViewRetryCount = 0;
+          _startLiveView();
+        }
       }
     } catch (_) {
       // Silent retry — don't change connection state on transient failures.
@@ -249,7 +285,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try { _protocol.stopLiveView(); } catch (_) {}
 
     _liveViewActive = true;
-    _liveViewRetryCount = 0;
     AppLog.info('Home', 'Starting live view...');
 
     try {
@@ -264,23 +299,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onError: (e) {
           debugPrint('[HomeScreen] live view error: $e');
           _liveViewActive = false;
+          // Camera unreachable — stop hammering. The connection state machine
+          // (heartbeat / /info watchdog) will restart live view once the
+          // camera is back. Only do a few bounded retries for transient blips
+          // while still connected.
+          if (!_isConnected) return;
           _liveViewRetryCount++;
-          if (_liveViewRetryCount <= _maxLiveViewRetries && mounted && _isConnected) {
+          if (_liveViewRetryCount <= _maxLiveViewRetries && mounted) {
             final delay = Duration(seconds: 2 * _liveViewRetryCount);
             AppLog.info('Home', 'Live view error, retry $_liveViewRetryCount in ${delay.inSeconds}s');
             Future.delayed(delay, () {
               if (mounted && _isConnected && !_liveViewActive) _startLiveView();
             });
+          } else {
+            AppLog.info('Home', 'Live view retries exhausted — waiting for reconnect');
           }
         },
         onDone: () {
           debugPrint('[HomeScreen] live view ended');
           _liveViewActive = false;
-          // If the stream ended unexpectedly while we think we're connected,
-          // try to restart it.
-          if (mounted && _isConnected) {
-            AppLog.info('Home', 'Live view stream ended, restarting...');
+          // Only restart if we still believe the camera is connected AND we
+          // haven't exhausted retries. Previously this restarted unconditionally,
+          // which caused a 1/sec retry storm against a dead camera for minutes.
+          if (!mounted || !_isConnected) return;
+          _liveViewRetryCount++;
+          if (_liveViewRetryCount <= _maxLiveViewRetries) {
+            AppLog.info('Home', 'Live view stream ended, restarting (retry $_liveViewRetryCount)...');
             _startLiveView();
+          } else {
+            AppLog.info('Home', 'Live view ended, retries exhausted — waiting for reconnect');
           }
         },
       );

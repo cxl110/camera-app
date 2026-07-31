@@ -369,15 +369,19 @@ class _BordersScreenState extends State<BordersScreen> {
       }
       if (toSave == null) return;
 
-      await imageService.saveWithUpscale(
+      final result = await imageService.saveWithUpscale(
         toSave,
         imageService.currentPhotoName ?? 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Photo saved'),
-          backgroundColor: const Color(0xFF2E7D32),
+          content: Text(result.gallerySaved
+              ? 'Saved to gallery'
+              : (result.error ?? 'Not saved to gallery')),
+          backgroundColor: result.gallerySaved
+              ? const Color(0xFF2E7D32)
+              : Colors.red,
           duration: const Duration(seconds: 2),
         ),
       );

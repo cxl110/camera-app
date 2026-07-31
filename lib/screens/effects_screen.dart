@@ -495,15 +495,19 @@ class _EffectsScreenState extends State<EffectsScreen> {
     }
 
     try {
-      await imageService.saveWithUpscale(
+      final result = await imageService.saveWithUpscale(
         output,
         imageService.currentPhotoName ?? 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Photo saved'),
-          backgroundColor: const Color(0xFF2E7D32),
+          content: Text(result.gallerySaved
+              ? 'Saved to gallery'
+              : (result.error ?? 'Not saved to gallery')),
+          backgroundColor: result.gallerySaved
+              ? const Color(0xFF2E7D32)
+              : Colors.red,
           duration: const Duration(seconds: 2),
         ),
       );
