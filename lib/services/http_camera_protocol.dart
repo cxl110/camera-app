@@ -642,8 +642,11 @@ class HttpCameraProtocol extends CameraProtocol {
       {PhotoQuality quality = PhotoQuality.original}) async* {
     final token = _computeToken();
     AppLog.info('HttpCam', 'downloadPhoto (stream): $photoId (token=$token)');
-    // Hold a concurrency slot across the whole streamed download.
-    await _httpSlots.acquire();
+    // NOTE: file downloads are NOT throttled by the global concurrency cap.
+    // The cap exists to protect the camera from BURST traffic (20 thumbnails at
+    // once). A file download is a single connection and runs at full WiFi speed;
+    // putting it behind the 4-slot pool made large video downloads queue behind
+    // thumbnails/live view and slowed them several-fold.
     try {
       final request = http.Request('GET', Uri.parse('$baseUrl/file/$photoId'));
       request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
@@ -675,8 +678,6 @@ class HttpCameraProtocol extends CameraProtocol {
       AppLog.error('HttpCam', 'downloadPhoto error', e);
       debugPrint('[HttpCamera] downloadPhoto error: $e');
       rethrow;
-    } finally {
-      _httpSlots.release();
     }
   }
 
@@ -684,9 +685,10 @@ class HttpCameraProtocol extends CameraProtocol {
   Future<Uint8List?> downloadPhotoBytes(String photoId) async {
     try {
       AppLog.info('HttpCam', 'downloadPhoto: $photoId (token=${_computeToken()})');
-      final response = await _withSlot(() => _client
+      // Unthrottled — file downloads run at full speed (see downloadPhoto above).
+      final response = await _client
           .get(Uri.parse('$baseUrl/file/$photoId'), headers: _authHeaders)
-          .timeout(const Duration(seconds: 60)));
+          .timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
         return response.bodyBytes;
@@ -764,7 +766,7 @@ class HttpCameraProtocol extends CameraProtocol {
       if (!bootResult) {
         AppLog.error('HttpCam', 'OTA: boot.img upload failed');
         yield const OtaProgress(status: OtaStatus.failed, percent: 0.0,
-            error: '固件上传失败');
+            error: 'Firmware upload failed');
         return;
       }
 
@@ -775,7 +777,7 @@ class HttpCameraProtocol extends CameraProtocol {
     } catch (e) {
       AppLog.error('HttpCam', 'OTA: boot.img upload error', e);
       yield OtaProgress(status: OtaStatus.failed,
-          percent: bootBytes.length / totalSize, error: '固件上传失败: $e');
+          percent: bootBytes.length / totalSize, error: 'Firmware upload failed: $e');
       return;
     }
 
@@ -790,7 +792,7 @@ class HttpCameraProtocol extends CameraProtocol {
       if (!rootfsResult) {
         AppLog.error('HttpCam', 'OTA: rootfs.img upload failed');
         yield const OtaProgress(status: OtaStatus.failed, percent: 0.5,
-            error: '固件上传失败');
+            error: 'Firmware upload failed');
         return;
       }
 
@@ -800,21 +802,27 @@ class HttpCameraProtocol extends CameraProtocol {
     } catch (e) {
       AppLog.error('HttpCam', 'OTA: rootfs.img upload error', e);
       yield OtaProgress(status: OtaStatus.failed,
-          percent: 0.5, error: '固件上传失败: $e');
+          percent: 0.5, error: 'Firmware upload failed: $e');
       return;
     }
 
-    // ── Step 3: Wait for flashing → reboot ──
+    // ── Step 3: Wait for flashing → device reboots (WiFi drops) ──
     yield const OtaProgress(status: OtaStatus.flashing, percent: 1.0);
     AppLog.info('HttpCam', 'OTA: firmware flashing, waiting for reboot...');
 
-    // Poll /update_status until connection drops (device reboots)
+    // Poll /update_status until the connection drops — that means the device
+    // has finished flashing and is rebooting. We do NOT wait for the device to
+    // come back online here: a reboot takes ~3 minutes, and blocking the UI on
+    // that would freeze the update screen. Instead we hand control back to the
+    // caller (which dismisses the dialog and asks the user to wait & reconnect).
+    bool connectionDropped = false;
     for (var i = 0; i < 30; i++) {
       await Future.delayed(const Duration(seconds: 2));
       try {
         final status = await getUpdateStatus();
         if (status == null) {
           // Connection lost = device is rebooting
+          connectionDropped = true;
           break;
         }
         final s = status['status'] as String? ?? '';
@@ -826,39 +834,24 @@ class HttpCameraProtocol extends CameraProtocol {
         // Any other status after we've uploaded means something went wrong
         if (s == 'idle' || s == 'receiving_boot' || s == 'boot_done') {
           // Device didn't enter flashing — unexpected
-          yield OtaProgress(status: OtaStatus.failed, percent: 1.0,
-              error: '设备未进入刷写状态');
+          yield const OtaProgress(status: OtaStatus.failed, percent: 1.0,
+              error: 'Device did not enter flashing state');
           return;
         }
       } catch (e) {
         // Connection lost = device is rebooting (expected)
         AppLog.info('HttpCam', 'OTA: connection lost (device rebooting)');
+        connectionDropped = true;
         break;
       }
     }
 
-    // ── Step 4: Wait for device to come back online ──
+    // Connection dropped (or polling window elapsed) → device is rebooting.
+    // Signal rebooting and end the stream; the caller dismisses the dialog and
+    // tells the user to wait for the camera to restart, then reconnect.
+    AppLog.info('HttpCam', 'OTA: device rebooting — handing back to user');
     yield const OtaProgress(status: OtaStatus.rebooting, percent: 1.0);
-    AppLog.info('HttpCam', 'OTA: waiting for device to reboot...');
-
-    // Wait ~30s for reboot, then try to reconnect
-    await Future.delayed(const Duration(seconds: 30));
-
-    for (var attempt = 0; attempt < 10; attempt++) {
-      await Future.delayed(const Duration(seconds: 3));
-      try {
-        final status = await getConnectionStatus();
-        if (status.connected) {
-          AppLog.info('HttpCam', 'OTA: device back online, fw_version=${status.fwVersion}');
-          yield const OtaProgress(status: OtaStatus.done, percent: 1.0);
-          return;
-        }
-      } catch (_) {}
-    }
-
-    // Device didn't come back — might still be rebooting or update failed
-    AppLog.info('HttpCam', 'OTA: device did not come back online after reboot');
-    yield const OtaProgress(status: OtaStatus.done, percent: 1.0);
+    return;
   }
 
   /// Upload a single firmware image (boot or rootfs) to POST /update.

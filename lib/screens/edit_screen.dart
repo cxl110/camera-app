@@ -41,24 +41,24 @@ class _EditScreenState extends State<EditScreen> {
           IconButton(
             icon: const Icon(Icons.compare),
             onPressed: () => setState(() => _showOriginal = !_showOriginal),
-            tooltip: '对比原图',
+            tooltip: 'Compare original',
           ),
           IconButton(
             icon: const Icon(Icons.water_drop_outlined),
             onPressed: () {
               // TODO: Add watermark
             },
-            tooltip: '水印',
+            tooltip: 'Watermark',
           ),
           IconButton(
             icon: const Icon(Icons.save_outlined),
             onPressed: _isSaving ? null : _saveImage,
-            tooltip: '保存',
+            tooltip: 'Save',
           ),
           IconButton(
             icon: const Icon(Icons.share_outlined),
             onPressed: _shareImage,
-            tooltip: '分享',
+            tooltip: 'Share',
           ),
         ],
       ),
@@ -263,7 +263,7 @@ class _EditScreenState extends State<EditScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('滤镜应用失败: $e')),
+          SnackBar(content: Text('Filter failed: $e')),
         );
       }
     }
@@ -272,7 +272,7 @@ class _EditScreenState extends State<EditScreen> {
   Future<void> _saveImage() async {
     if (_filteredFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择滤镜')),
+        const SnackBar(content: Text('Please select a filter first')),
       );
       return;
     }
@@ -287,7 +287,7 @@ class _EditScreenState extends State<EditScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('已保存'),
+            content: Text('Saved'),
             backgroundColor: Colors.green,
           ),
         );
@@ -295,7 +295,7 @@ class _EditScreenState extends State<EditScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存失败: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -306,7 +306,7 @@ class _EditScreenState extends State<EditScreen> {
   Future<void> _shareImage() async {
     // TODO: Implement share with share_plus
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('分享功能开发中')),
+      const SnackBar(content: Text('Share coming soon')),
     );
   }
 }

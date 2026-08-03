@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/camera_protocol.dart';
 import '../services/firmware_service.dart';
@@ -62,6 +63,17 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
   double _percent = 0.0;
   String? _error;
   bool _updating = false;
+  // True once the upload finished and the device began rebooting (WiFi dropped).
+  // In this state the dialog shows a "wait & reconnect" screen instead of the
+  // progress bar, and the caller is told the update is mid-reboot (not done).
+  bool _rebooting = false;
+  Timer? _autoCloseTimer;
+
+  @override
+  void dispose() {
+    _autoCloseTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -69,12 +81,76 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
       backgroundColor: const Color(0xFF1A1A2E),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Text(
-        '固件更新',
+        _rebooting ? 'Rebooting' : 'Firmware Update',
         style: const TextStyle(color: Colors.white, fontSize: 18),
       ),
-      content: _updating ? _buildProgress() : _buildConfirmation(),
-      actions: _updating ? null : _buildActions(),
+      content: _rebooting
+          ? _buildRebooting()
+          : (_updating ? _buildProgress() : _buildConfirmation()),
+      actions: _rebooting
+          ? _buildRebootingActions()
+          : (_updating ? null : _buildActions()),
     );
+  }
+
+  /// "Device is rebooting" screen — shown after the upload succeeds and the
+  /// camera drops its WiFi connection to restart. We don't block here waiting
+  /// for it to come back (a reboot takes ~3 minutes); instead we tell the user
+  /// to wait and reconnect, then dismiss the dialog so the rest of the app is
+  /// usable.
+  Widget _buildRebooting() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.restart_alt, color: Colors.lightBlue, size: 48),
+        const SizedBox(height: 16),
+        const Text(
+          'Firmware uploaded. The camera is now restarting.',
+          style: TextStyle(color: Colors.white, fontSize: 14),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'This takes about 2–3 minutes. Please wait for the camera to '
+          'finish restarting, then reconnect to its WiFi and open the app '
+          'again to verify the new firmware version.',
+          style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.6),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber, color: Colors.orange, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Do not power off the camera while it is restarting.',
+                  style: TextStyle(color: Colors.orange.shade200, fontSize: 12, height: 1.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildRebootingActions() {
+    return [
+      TextButton(
+        // Pops with null = mid-reboot (neither success nor failure yet).
+        onPressed: () => Navigator.pop(context, null),
+        child: const Text('OK', style: TextStyle(color: Color(0xFF4CAF50))),
+      ),
+    ];
   }
 
   Widget _buildConfirmation() {
@@ -82,9 +158,9 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _infoRow('新版本', widget.bundledVersion),
+        _infoRow('New version', widget.bundledVersion),
         const SizedBox(height: 8),
-        _infoRow('当前版本', widget.cameraVersion ?? '未知'),
+        _infoRow('Current version', widget.cameraVersion ?? 'Unknown'),
         const SizedBox(height: 20),
         Container(
           padding: const EdgeInsets.all(12),
@@ -100,7 +176,7 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
                 children: [
                   Icon(Icons.warning_amber, color: Colors.orange, size: 18),
                   const SizedBox(width: 6),
-                  Text('注意事项',
+                  Text('Please note',
                       style: TextStyle(
                           color: Colors.orange,
                           fontSize: 13,
@@ -109,10 +185,10 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
               ),
               const SizedBox(height: 8),
               Text(
-                '• 更新期间请勿断开WiFi\n'
-                '• 更新期间请勿关闭APP\n'
-                '• 确保相机电量充足\n'
-                '• 更新过程约需1分钟',
+                '• Do not disconnect Wi-Fi during the update\n'
+                '• Do not close the app during the update\n'
+                '• Ensure the camera has sufficient battery\n'
+                '• The update takes about 1 minute',
                 style: TextStyle(color: Colors.orange.shade200, fontSize: 12, height: 1.6),
               ),
             ],
@@ -124,12 +200,12 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
 
   Widget _buildProgress() {
     final statusText = switch (_status) {
-      OtaStatus.uploading => '正在更新固件...',
-      OtaStatus.flashing => '固件刷写中...',
-      OtaStatus.rebooting => '设备正在重启，请等待...',
-      OtaStatus.done => '更新成功！',
-      OtaStatus.failed => '更新失败',
-      OtaStatus.idle => '准备中...',
+      OtaStatus.uploading => 'Updating firmware...',
+      OtaStatus.flashing => 'Flashing firmware...',
+      OtaStatus.rebooting => 'Device is rebooting, please wait...',
+      OtaStatus.done => 'Update successful!',
+      OtaStatus.failed => 'Update failed',
+      OtaStatus.idle => 'Preparing...',
     };
 
     final isDone = _status == OtaStatus.done;
@@ -190,7 +266,7 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
         if (!isDone && !isFailed) ...[
           const SizedBox(height: 16),
           Text(
-            '⚠️ 请勿关闭APP或断开WiFi',
+            '⚠️ Do not close the app or disconnect Wi-Fi',
             style: TextStyle(color: Colors.orange.shade300, fontSize: 12),
           ),
         ],
@@ -204,13 +280,13 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
               if (isFailed)
                 TextButton(
                   onPressed: _startUpdate,
-                  child: const Text('重试',
+                  child: const Text('Retry',
                       style: TextStyle(color: Color(0xFF4CAF50))),
                 ),
               TextButton(
                 onPressed: () => Navigator.pop(context, isDone),
                 child: Text(
-                  isDone ? '完成' : '关闭',
+                  isDone ? 'Done' : 'Close',
                   style: TextStyle(
                       color: isDone
                           ? const Color(0xFF4CAF50)
@@ -228,11 +304,11 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
     return [
       TextButton(
         onPressed: () => Navigator.pop(context, false),
-        child: const Text('取消', style: TextStyle(color: Colors.white54)),
+        child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
       ),
       TextButton(
         onPressed: _startUpdate,
-        child: const Text('立即更新',
+        child: const Text('Update now',
             style: TextStyle(color: Color(0xFF4CAF50))),
       ),
     ];
@@ -270,7 +346,9 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
       AppLog.info('OTA', 'Starting firmware update: '
           'boot=${bootBytes.length} bytes, rootfs=${rootfsBytes.length} bytes');
 
-      // Upload and monitor progress
+      // Upload and monitor progress. The stream ends with OtaStatus.rebooting
+      // once the device finishes flashing and drops the WiFi connection — it
+      // does NOT wait for the device to come back online.
       await for (final progress in widget.protocol.uploadFirmware(
         bootBytes: bootBytes,
         rootfsBytes: rootfsBytes,
@@ -282,6 +360,21 @@ class _OtaUpdateDialogState extends State<OtaUpdateDialog> {
           _error = progress.error;
         });
       }
+
+      // Stream ended. If we reached the rebooting phase, the upload succeeded
+      // and the device is now restarting: switch to the "wait & reconnect"
+      // screen and auto-close shortly so the user isn't stuck on this dialog.
+      if (_status == OtaStatus.rebooting && _error == null) {
+        setState(() => _rebooting = true);
+        AppLog.info('OTA', 'Firmware uploaded; device rebooting — '
+            'showing wait screen, dialog will auto-close');
+        _autoCloseTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) Navigator.pop(context, null); // null = mid-reboot
+        });
+        return;
+      }
+
+      // Any other terminal state (done/failed) is handled by _buildProgress.
     } catch (e) {
       if (!mounted) return;
       AppLog.error('OTA', 'Firmware update failed', e);

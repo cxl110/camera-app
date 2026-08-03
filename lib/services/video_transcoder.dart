@@ -48,6 +48,26 @@ class VideoTranscoder {
           'Transcoded: ${result['width']}x${result['height']}, '
           '${result['frameCount']} frames, ${result['fps']} fps');
 
+      // Audio diagnostics (the native parser reports whether the AVI has an
+      // audio stream and its format). PCM audio is now written into the MP4;
+      // non-PCM codecs are skipped.
+      final audio = result['audio'] as Map<dynamic, dynamic>?;
+      if (audio == null || audio['hasAudio'] != true) {
+        AppLog.info('VideoTranscoder', 'Audio: none (AVI has no audio stream)');
+      } else {
+        final tag = audio['formatTag'];
+        final ch = audio['channels'];
+        final rate = audio['sampleRate'];
+        final bits = audio['bitsPerSample'];
+        final bytes = audio['bytes'];
+        final codec = tag == 1
+            ? 'PCM'
+            : (tag == 2 ? 'ADPCM' : 'tag=$tag');
+        AppLog.info('VideoTranscoder',
+            'Audio: $codec, ch=$ch, rate=$rate, bits=$bits, ${bytes} bytes'
+            '${tag == 1 ? ' (written to MP4)' : ' (skipped — unsupported codec)'}');
+      }
+
       // 3. Save MP4 to system photo library.
       await Gal.putVideo(mp4Path);
       AppLog.info('VideoTranscoder', 'Saved to gallery');

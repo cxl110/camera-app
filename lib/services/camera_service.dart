@@ -88,7 +88,7 @@ class CameraService extends ChangeNotifier {
 
       if (_cameraBaseUrl == null) {
         _state = ConnectionState.error;
-        _errorMessage = '未检测到相机设备，请确认已连接相机WiFi';
+        _errorMessage = 'No camera detected. Make sure you are connected to the camera Wi-Fi';
         notifyListeners();
         return false;
       }
@@ -111,12 +111,12 @@ class CameraService extends ChangeNotifier {
       return true;
     } on TimeoutException {
       _state = ConnectionState.error;
-      _errorMessage = '连接超时，请检查相机WiFi设置';
+      _errorMessage = 'Connection timed out. Check the camera Wi-Fi settings';
       notifyListeners();
       return false;
     } catch (e) {
       _state = ConnectionState.error;
-      _errorMessage = '连接失败: $e';
+      _errorMessage = 'Connection failed: $e';
       notifyListeners();
       return false;
     }
@@ -145,7 +145,7 @@ class CameraService extends ChangeNotifier {
       // Try alternative endpoints based on brand
       return await _tryAlternativePhotoList();
     } catch (e) {
-      _errorMessage = '无法获取照片列表: $e';
+      _errorMessage = 'Could not get photo list: $e';
       return [];
     }
   }
@@ -166,7 +166,7 @@ class CameraService extends ChangeNotifier {
         return file;
       }
     } catch (e) {
-      _errorMessage = '下载失败: $e';
+      _errorMessage = 'Download failed: $e';
     }
     return null;
   }

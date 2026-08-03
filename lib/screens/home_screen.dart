@@ -204,11 +204,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       firmwareService: _firmwareService,
     );
 
-    if (result == true && mounted) {
-      // Update succeeded — re-check connection to get new fw_version
+    if (!mounted) return;
+
+    if (result == true) {
+      // Update fully succeeded — re-check connection to get new fw_version.
       setState(() => _firmwareUpdateAvailable = false);
       await _retryConnection();
+    } else if (result == null) {
+      // Firmware was uploaded and the device is rebooting (WiFi dropped). We
+      // don't know the outcome yet — the camera takes ~2-3 min to restart.
+      // Hide the update button and ask the user to wait & reconnect.
+      setState(() => _firmwareUpdateAvailable = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Camera is restarting. Wait ~2-3 minutes, reconnect to its '
+              'WiFi, then reopen the app to confirm the update.'),
+          duration: Duration(seconds: 8),
+        ),
+      );
     }
+    // result == false: user cancelled before updating — keep the button.
   }
 
   void _showWiFiGuide() {
@@ -458,9 +474,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ],
               ),
-              tooltip: '固件更新',
+              tooltip: 'Firmware update',
             ),
-          // 上传日志按钮
+          // Upload logs button
           IconButton(
             onPressed: _onUploadLogs,
             icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
@@ -509,7 +525,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // 3. Show uploading indicator.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('正在上传日志...'),
+          content: Text('Uploading logs...'),
           backgroundColor: Color(0xFF1A1A2E),
           duration: Duration(seconds: 1),
         ),
@@ -526,7 +542,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('上传失败: $e'),
+            content: Text('Upload failed: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -537,7 +553,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       AppLog.error('Home', 'Upload logs failed to start', e);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('无法打开日志上传: $e'),
+          content: Text('Could not open log upload: $e'),
           backgroundColor: Colors.red,
         ),
       );

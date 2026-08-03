@@ -1,5 +1,5 @@
 {
-  "version": "V0.5-20260730",
-  "boot_size": 0,
-  "rootfs_size": 0
+  "version": "V0.5-20260733",
+  "boot_size": 4104192,
+  "rootfs_size": 5541888
 }

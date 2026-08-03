@@ -149,7 +149,7 @@ class _BordersScreenState extends State<BordersScreen> {
             icon: Icon(Icons.folder_outlined,
                 color: Colors.white.withValues(alpha: 0.7), size: 22),
             onPressed: _onOpenAlbum,
-            tooltip: '相册',
+            tooltip: 'Album',
           ),
         ],
       ),
@@ -339,7 +339,8 @@ class _BordersScreenState extends State<BordersScreen> {
   }
 
   void _onOpenAlbum() async {
-    // 与 EFFECTS 页一致：跳转相册浏览页，而不是直接加载第一张照片。
+    // Same as EFFECTS page: push to the gallery browser rather than loading the
+    // first photo directly.
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const GalleryScreen()),

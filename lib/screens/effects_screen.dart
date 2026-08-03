@@ -457,8 +457,9 @@ class _EffectsScreenState extends State<EffectsScreen> {
   }
 
   void _onOpenAlbum() async {
-    // 跳转相册浏览页（iOS 相册风格），而不是直接加载第一张照片。
-    // EFFECTS 页本身不持有 live view，直接 push 即可。
+    // Push to the gallery browser (iOS Photos style) rather than loading the
+    // first photo directly. The EFFECTS page itself holds no live view, so a
+    // plain push is enough.
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const GalleryScreen()),

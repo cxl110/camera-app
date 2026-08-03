@@ -75,113 +75,113 @@ class PhotoFilter {
       const PhotoFilter(
         id: 'fuji-acros', name: 'ACROS', brand: 'Fuji', category: 'bw',
         modelPath: 'assets/models/fuji_acros.mlmodel',
-        description: '富士经典黑白胶片色调，丰富的细节层次',
+        description: 'Classic Fuji B&W film tones with rich tonal detail',
       ),
       const PhotoFilter(
         id: 'fuji-classic-chrome', name: 'CLASSIC CHROME', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_classic_chrome.mlmodel',
-        description: '低调色彩，纪实风格的首选',
+        description: 'Muted colors, the go-to for documentary style',
       ),
       const PhotoFilter(
         id: 'fuji-eterna', name: 'ETERNA', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_eterna.mlmodel',
-        description: '电影胶片柔和色彩，富有叙事感',
+        description: 'Soft cinematic film colors with a narrative feel',
       ),
       const PhotoFilter(
         id: 'fuji-eterna-bleach', name: 'ETERNA BLEACH BYPASS', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_eterna_bleach.mlmodel',
-        description: '低饱和度、高对比度的电影漂白效果',
+        description: 'Low-saturation, high-contrast cinematic bleach bypass',
       ),
       const PhotoFilter(
         id: 'fuji-classic-neg', name: 'CLASSIC Neg.', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_classic_neg.mlmodel',
-        description: '高对比度的现代负片色彩',
+        description: 'High-contrast modern negative colors',
       ),
       const PhotoFilter(
         id: 'fuji-pro-neg-hi', name: 'PRO Neg.Hi', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_pro_neg_hi.mlmodel',
-        description: '专业人像负片，肤色还原出色',
+        description: 'Pro portrait negative with excellent skin tones',
       ),
       const PhotoFilter(
         id: 'fuji-nostalgic-neg', name: 'NOSTALGIC Neg.', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_nostalgic_neg.mlmodel',
-        description: '怀旧琥珀色调的负片色彩',
+        description: 'Nostalgic amber-toned negative colors',
       ),
       const PhotoFilter(
         id: 'fuji-pro-neg-std', name: 'PRO Neg.Std', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_pro_neg_std.mlmodel',
-        description: '标准专业负片，自然柔和的色彩',
+        description: 'Standard pro negative, natural and soft colors',
       ),
       const PhotoFilter(
         id: 'fuji-astia', name: 'ASTIA', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_astia.mlmodel',
-        description: '柔和的反转片，肤色与花卉出色',
+        description: 'Soft reversal film, great for skin tones and flowers',
       ),
       const PhotoFilter(
         id: 'fuji-provia', name: 'PROVIA', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_provia.mlmodel',
-        description: '标准反转片，色彩真实还原',
+        description: 'Standard reversal film with true-to-life colors',
       ),
       const PhotoFilter(
         id: 'fuji-velvia', name: 'VELVIA', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_velvia.mlmodel',
-        description: '鲜艳的风光反转片，饱和度极高',
+        description: 'Vivid landscape reversal film with high saturation',
       ),
       const PhotoFilter(
         id: 'fuji-pro400h', name: 'Pro 400H', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_pro400h.mlmodel',
-        description: '专业彩色负片，日系清新风格',
+        description: 'Pro color negative, fresh Japanese-style tones',
       ),
       const PhotoFilter(
         id: 'fuji-superia400', name: 'Superia 400', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_superia400.mlmodel',
-        description: '日常彩色负片，色彩鲜明',
+        description: 'Everyday color negative with vivid colors',
       ),
       const PhotoFilter(
         id: 'fuji-reala', name: 'reala', brand: 'Fuji', category: 'film',
         modelPath: 'assets/models/fuji_reala.mlmodel',
-        description: '真实色彩还原，低反差负片',
+        description: 'True color reproduction, low-contrast negative',
       ),
 
       // === Kodak ===
       const PhotoFilter(
         id: 'kodak-color-plus', name: 'Color Plus', brand: 'Kodak', category: 'film',
         modelPath: 'assets/models/kodak_color_plus.mlmodel',
-        description: '柯达经典消费级彩色负片，暖调怀旧',
+        description: 'Classic Kodak consumer color negative, warm and nostalgic',
       ),
       const PhotoFilter(
         id: 'kodak-gold200', name: 'Gold 200', brand: 'Kodak', category: 'film',
         modelPath: 'assets/models/kodak_gold200.mlmodel',
-        description: '金色暖调的经典日光负片',
+        description: 'Golden warm-toned classic daylight negative',
       ),
       const PhotoFilter(
         id: 'kodak-portra400', name: 'Portra 400', brand: 'Kodak', category: 'film',
         modelPath: 'assets/models/kodak_portra400.mlmodel',
-        description: '专业人像负片标杆，肤色调和完美',
+        description: 'Benchmark pro portrait negative, perfect skin tones',
       ),
       const PhotoFilter(
         id: 'kodak-portra160nc', name: 'Portra 160NC', brand: 'Kodak', category: 'film',
         modelPath: 'assets/models/kodak_portra160nc.mlmodel',
-        description: '低感光度专业负片，中性色彩',
+        description: 'Low-ISO pro negative with neutral colors',
       ),
       const PhotoFilter(
         id: 'kodak-ultramax400', name: 'UltraMax 400', brand: 'Kodak', category: 'film',
         modelPath: 'assets/models/kodak_ultramax400.mlmodel',
-        description: '高饱和度通用负片，浓郁柯达色彩',
+        description: 'High-saturation general-purpose negative, rich Kodak colors',
       ),
 
       // === Olympus ===
       const PhotoFilter(
         id: 'olympus-vivid', name: 'VIVID', brand: 'Olympus', category: 'color',
         modelPath: 'assets/models/olympus_vivid.mlmodel',
-        description: '奥林巴斯鲜艳色彩模式',
+        description: 'Olympus vivid color mode',
       ),
 
       // === Polaroid ===
       const PhotoFilter(
         id: 'polaroid', name: 'Polaroid', brand: 'Polaroid', category: 'film',
         modelPath: 'assets/models/polaroid.mlmodel',
-        description: '宝丽来即影即有经典色调',
+        description: 'Classic Polaroid instant-film tones',
       ),
     ];
   }

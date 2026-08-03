@@ -24,7 +24,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
       builder: (context, cameraService, _) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('连接相机'),
+            title: const Text('Connect Camera'),
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
               onPressed: () {
@@ -74,31 +74,31 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
     switch (service.state) {
       case ConnectionState.disconnected:
         icon = Icons.wifi_off;
-        text = '未连接';
+        text = 'Not connected';
         color = Colors.white38;
-        subtitle = '请连接到相机WiFi网络';
+        subtitle = 'Please connect to the camera Wi-Fi network';
       case ConnectionState.connecting:
         icon = Icons.wifi_find;
-        text = '正在连接...';
+        text = 'Connecting...';
         color = Colors.amber;
-        subtitle = '检测相机设备中';
+        subtitle = 'Detecting camera device';
       case ConnectionState.connected:
         icon = Icons.wifi;
-        text = '已连接';
+        text = 'Connected';
         color = Colors.green;
         subtitle = service.detectedBrand != CameraBrand.auto
-            ? '检测到 ${service.detectedBrand.name} 相机'
+            ? '${service.detectedBrand.name} camera detected'
             : service.cameraBaseUrl ?? '';
       case ConnectionState.transferring:
         icon = Icons.downloading;
-        text = '传输中';
+        text = 'Transferring';
         color = Colors.blue;
         subtitle = '${service.transferredCount}/${service.totalCount}';
       case ConnectionState.error:
         icon = Icons.error_outline;
-        text = '连接失败';
+        text = 'Connection failed';
         color = Colors.red;
-        subtitle = service.errorMessage ?? '未知错误';
+        subtitle = service.errorMessage ?? 'Unknown error';
     }
 
     return Container(
@@ -136,12 +136,12 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
-            '输入相机地址',
+            'Enter camera address',
             style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 4),
           const Text(
-            '相机WiFi IP地址，如 192.168.122.1:8080',
+            'Camera Wi-Fi IP address, e.g. 192.168.122.1:8080',
             style: TextStyle(color: Colors.white38, fontSize: 12),
           ),
           const SizedBox(height: 12),
@@ -171,9 +171,9 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
                           _urlController.clear();
                           service.disconnect();
                         }
-                      : () => service.connect(ssid: '相机WiFi'),
+                      : () => service.connect(ssid: 'Camera Wi-Fi'),
                   icon: Icon(isConnected ? Icons.link_off : Icons.auto_mode),
-                  label: Text(isConnected ? '断开连接' : '自动检测'),
+                  label: Text(isConnected ? 'Disconnect' : 'Auto detect'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white60,
                     side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
@@ -191,7 +191,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
                       ? null
                       : () => service.connect(baseUrl: _urlController.text.trim()),
                   icon: const Icon(Icons.wifi),
-                  label: const Text('连接'),
+                  label: const Text('Connect'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF2D5BD8),
                     padding: const EdgeInsets.all(14),
@@ -211,13 +211,13 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
                 if (mounted && service.photos.isNotEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('发现 ${service.photos.length} 张照片'),
+                      content: Text('${service.photos.length} photos found'),
                     ),
                   );
                 }
               },
               icon: const Icon(Icons.photo_library),
-              label: const Text('浏览相机照片'),
+              label: const Text('Browse camera photos'),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF8B3DC1),
                 padding: const EdgeInsets.all(14),
@@ -251,7 +251,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            '${service.transferredCount} / ${service.totalCount} 张',
+            '${service.transferredCount} / ${service.totalCount} photos',
             style: const TextStyle(color: Colors.white38, fontSize: 13),
           ),
         ],
@@ -270,14 +270,14 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '💡 使用提示',
+            '💡 Quick guide',
             style: TextStyle(color: Colors.white60, fontSize: 13, fontWeight: FontWeight.w500),
           ),
           SizedBox(height: 8),
-          _HelpStep('1', '打开相机的WiFi功能（通常在菜单 → 无线通信 → WiFi设置）'),
-          _HelpStep('2', '在手机WiFi设置中连接相机的WiFi热点'),
-          _HelpStep('3', '返回APP，点击"自动检测"或手动输入相机地址'),
-          _HelpStep('4', '连接成功后即可浏览和下载相机中的照片'),
+          _HelpStep('1', 'Turn on the camera Wi-Fi (usually Menu → Wireless → Wi-Fi settings)'),
+          _HelpStep('2', 'Connect to the camera Wi-Fi hotspot in your phone Wi-Fi settings'),
+          _HelpStep('3', 'Return to the app and tap "Auto detect" or enter the camera address'),
+          _HelpStep('4', 'Once connected you can browse and download photos from the camera'),
         ],
       ),
     );

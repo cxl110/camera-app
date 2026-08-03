@@ -88,7 +88,17 @@ public class VideoTranscoderPlugin: NSObject, FlutterPlugin {
 
                 // 4. Encode
                 let encoder = H264Encoder(width: width, height: height, fps: parsed.fps)
-                try encoder.writeMP4(frames: parsed.frames, to: outURL)
+                try encoder.writeMP4(frames: parsed.frames, audio: parsed.audio, to: outURL)
+
+                // Report audio info back to Dart for logging/diagnostics.
+                var audioInfo: [String: Any] = ["hasAudio": parsed.audio != nil]
+                if let a = parsed.audio {
+                    audioInfo["formatTag"] = Int(a.formatTag)
+                    audioInfo["channels"] = Int(a.channels)
+                    audioInfo["sampleRate"] = Int(a.sampleRate)
+                    audioInfo["bitsPerSample"] = Int(a.bitsPerSample)
+                    audioInfo["bytes"] = a.samples.count
+                }
 
                 DispatchQueue.main.async {
                     result([
@@ -97,7 +107,8 @@ public class VideoTranscoderPlugin: NSObject, FlutterPlugin {
                         "height": height,
                         "frameCount": parsed.frames.count,
                         "fps": parsed.fps,
-                    ])
+                        "audio": audioInfo,
+                    ] as [String: Any])
                 }
             } catch let e as TranscodeError {
                 DispatchQueue.main.async {
@@ -137,9 +148,20 @@ struct TranscodeError: Error {
 ///
 /// We only need: fps (from MainHeader) and the '00dc' frames.
 struct AVIParser {
+    /// Parsed audio stream info (if the AVI has one).
+    struct AudioInfo {
+        let formatTag: UInt16   // 1 = PCM, 2 = ADPCM, ...
+        let channels: UInt16    // 1 mono, 2 stereo
+        let sampleRate: UInt32  // e.g. 8000, 11025, 22050, 44100
+        let bitsPerSample: UInt16 // 8 or 16
+        /// Concatenated raw audio payload bytes from all '01wb' chunks.
+        let samples: Data
+    }
+
     struct Result {
         let frames: [Data]   // raw JPEG bytes per frame
         let fps: Int
+        let audio: AudioInfo?
     }
 
     static func parse(data: Data) throws -> Result {
@@ -158,6 +180,10 @@ struct AVIParser {
 
         var fps: Int = 15 // default fallback (camera preview is ~15fps)
         var frames: [Data] = []
+        var audioChunks: [Data] = []
+        // Audio format discovered in hdrl/strl (stream index 1).
+        var audioFmt: (formatTag: UInt16, channels: UInt16,
+                       sampleRate: UInt32, bitsPerSample: UInt16)?
 
         // Walk the top-level chunks.
         while r.remaining > 8 {
@@ -168,13 +194,16 @@ struct AVIParser {
                 let listType = r.readFourCC()
                 let listEnd = r.position + (ckSize - 4)
                 if listType == "movi" {
-                    // Parse frames inside movi until listEnd.
-                    frames.append(contentsOf: parseMovi(reader: &r, end: listEnd))
+                    // Parse frames + audio inside movi until listEnd.
+                    let movi = parseMovi(reader: &r, end: listEnd)
+                    frames.append(contentsOf: movi.frames)
+                    audioChunks.append(contentsOf: movi.audio)
                     r.position = listEnd
                 } else if listType == "hdrl" {
-                    // Scan for the avih chunk to read fps.
-                    let maybeFps = parseHdrl(reader: &r, end: listEnd)
-                    if let f = maybeFps { fps = f }
+                    // Scan for avih (fps) and the audio stream's strf.
+                    let hdrl = parseHdrl(reader: &r, end: listEnd)
+                    if let f = hdrl.fps { fps = f }
+                    audioFmt = hdrl.audioFmt
                     r.position = listEnd
                 } else {
                     // Skip unknown LIST contents.
@@ -191,56 +220,84 @@ struct AVIParser {
             }
         }
 
-        return Result(frames: frames, fps: fps)
+        var audio: AudioInfo?
+        if let fmt = audioFmt, !audioChunks.isEmpty {
+            audio = AudioInfo(
+                formatTag: fmt.formatTag,
+                channels: fmt.channels,
+                sampleRate: fmt.sampleRate,
+                bitsPerSample: fmt.bitsPerSample,
+                samples: audioChunks.reduce(into: Data()) { $0.append($1) }
+            )
+        }
+
+        return Result(frames: frames, fps: fps, audio: audio)
     }
 
-    /// Parse 'movi' LIST body: collect all '00dc' (compressed video) chunks.
-    private static func parseMovi(reader: inout Reader, end: Int) -> [Data] {
+    /// Parse 'movi' LIST body: collect '00dc'/'00db' video frames and '01wb'
+    /// audio chunks. Stream index is the first char: '0' = video stream,
+    /// '1' = audio stream; suffix 'dc'/'db' = video, 'wb' = wave audio.
+    private static func parseMovi(reader: inout Reader, end: Int) -> (frames: [Data], audio: [Data]) {
         var frames: [Data] = []
+        var audio: [Data] = []
         while reader.position + 8 <= end {
             let ckID = reader.readFourCC()
             let ckSize = Int(reader.readUInt32())
             if reader.position + ckSize > end { break }
 
-            // '00dc' / '00db' = video stream 0, compressed/uncompressed.
-            // Also accept any '??dc' to be lenient.
             if ckID.hasSuffix("dc") || ckID.hasSuffix("db") {
+                // Video frame (compressed JPEG).
                 let frame = reader.readData(count: ckSize)
                 if frame.count > 2 && frame[0] == 0xFF && frame[1] == 0xD8 {
-                    // Valid JPEG (SOI marker)
                     frames.append(frame)
                 }
+            } else if ckID.hasSuffix("wb") {
+                // Audio (wave) payload — keep raw bytes; format comes from strf.
+                audio.append(reader.readData(count: ckSize))
             } else {
                 reader.skip(ckSize)
             }
             if ckSize % 2 != 0 { reader.skip(1) }
         }
-        return frames
+        return (frames, audio)
     }
 
-    /// Parse 'hdrl' LIST to find avih (Main AVI Header) and read fps.
-    /// dwMicroSecPerFrame is the 4th DWORD in the avih chunk.
-    private static func parseHdrl(reader: inout Reader, end: Int) -> Int? {
+    /// Parse 'hdrl' LIST: find avih (fps) and the audio stream's strf
+    /// (WAVEFORMATEX). We scan each 'strl' sub-list; the first stream whose
+    /// strh fccType is 'auds' is treated as the audio stream.
+    private static func parseHdrl(reader: inout Reader, end: Int)
+        -> (fps: Int?, audioFmt: (formatTag: UInt16, channels: UInt16,
+                                  sampleRate: UInt32, bitsPerSample: UInt16)?) {
+        var fps: Int?
+        var audioFmt: (formatTag: UInt16, channels: UInt16,
+                       sampleRate: UInt32, bitsPerSample: UInt16)?
+
         while reader.position + 8 <= end {
             let ckID = reader.readFourCC()
             let ckSize = Int(reader.readUInt32())
             if reader.position + ckSize > end { break }
 
             if ckID == "avih" {
-                // avih: dwMicroSecPerFrame (offset 0, 4 bytes), dwMaxBytesPerSec,
-                // dwPadding, dwFlags, dwTotalFrames, ...
+                // avih: dwMicroSecPerFrame (offset 0), ...
                 let usPerFrame = reader.readUInt32()
-                reader.position = end
                 if usPerFrame > 0 {
-                    let fps = Int(round(1_000_000.0 / Double(usPerFrame)))
-                    return max(1, min(60, fps)) // sanity clamp
+                    fps = max(1, min(60, Int(round(1_000_000.0 / Double(usPerFrame)))))
                 }
-                return nil
+                reader.skip(ckSize - 4)
+                if ckSize % 2 != 0 { reader.skip(1) }
             } else if ckID == "LIST" {
                 let listType = reader.readFourCC()
                 let listEnd = reader.position + (ckSize - 4)
-                // Recurse into strl but we don't need anything from it for fps.
-                reader.position = listEnd
+                if listType == "strl" {
+                    // Scan this stream list for strh (type) + strf (format).
+                    let strl = parseStrl(reader: &reader, end: listEnd)
+                    if strl.isAudio, let f = strl.audioFmt {
+                        audioFmt = f
+                    }
+                    reader.position = listEnd
+                } else {
+                    reader.position = listEnd
+                }
                 if (ckSize - 4) % 2 != 0 { reader.skip(1) }
             } else {
                 reader.skip(ckSize)
@@ -248,7 +305,47 @@ struct AVIParser {
             }
         }
         reader.position = end
-        return nil
+        return (fps, audioFmt)
+    }
+
+    /// Parse a single 'strl' (stream header list): determine if it's audio
+    /// ('auds') and read the WAVEFORMATEX from 'strf'.
+    private static func parseStrl(reader: inout Reader, end: Int)
+        -> (isAudio: Bool,
+            audioFmt: (formatTag: UInt16, channels: UInt16,
+                       sampleRate: UInt32, bitsPerSample: UInt16)?) {
+        var isAudio = false
+        var fccType = ""
+        var audioFmt: (formatTag: UInt16, channels: UInt16,
+                       sampleRate: UInt32, bitsPerSample: UInt16)?
+
+        while reader.position + 8 <= end {
+            let ckID = reader.readFourCC()
+            let ckSize = Int(reader.readUInt32())
+            if reader.position + ckSize > end { break }
+
+            if ckID == "strh" {
+                fccType = reader.readFourCC() // 'vids' or 'auds'
+                isAudio = (fccType == "auds")
+                reader.skip(ckSize - 4)
+            } else if ckID == "strf" && isAudio {
+                // WAVEFORMATEX: wFormatTag(2), nChannels(2), nSamplesPerSec(4),
+                // nAvgBytesPerSec(4), nBlockAlign(2), wBitsPerSample(2), ...
+                let formatTag = reader.readUInt16()
+                let channels = reader.readUInt16()
+                let sampleRate = reader.readUInt32()
+                _ = reader.readUInt32() // nAvgBytesPerSec
+                _ = reader.readUInt16() // nBlockAlign
+                let bitsPerSample = reader.readUInt16()
+                audioFmt = (formatTag, channels, sampleRate, bitsPerSample)
+                reader.skip(ckSize - 16)
+            } else {
+                reader.skip(ckSize)
+            }
+            if ckSize % 2 != 0 { reader.skip(1) }
+        }
+        reader.position = end
+        return (isAudio, audioFmt)
     }
 }
 
@@ -270,6 +367,13 @@ struct Reader {
         let bytes = [UInt8](data[position..<position+4])
         position += 4
         return String(bytes: bytes, encoding: .ascii) ?? "????"
+    }
+
+    mutating func readUInt16() -> UInt16 {
+        guard position + 2 <= data.count else { return 0 }
+        let v = data.subdata(in: position..<position+2).withUnsafeBytes { $0.load(as: UInt16.self) }
+        position += 2
+        return v
     }
 
     mutating func readUInt32() -> UInt32 {
@@ -319,8 +423,9 @@ final class H264Encoder {
     }
 
     /// Decode each JPEG to CGImage → CVPixelBuffer, encode with VideoToolbox,
-    /// and write an MP4 container.
-    func writeMP4(frames: [Data], to outURL: URL) throws {
+    /// and write an MP4 container. If the AVI has a PCM audio stream, an audio
+    /// track is written alongside the video so the output has sound.
+    func writeMP4(frames: [Data], audio: AVIParser.AudioInfo?, to outURL: URL) throws {
         let writer: AVAssetWriter
         do {
             writer = try AVAssetWriter(outputURL: outURL, fileType: .mp4)
@@ -357,6 +462,40 @@ final class H264Encoder {
             ]
         )
 
+        // Audio: if the AVI has a PCM (formatTag == 1) audio stream, write it
+        // alongside the video so the output MP4 has sound. Confirmed format from
+        // device logs: PCM, 2ch, 48kHz, 16-bit. Non-PCM codecs (ADPCM etc.) are
+        // not written — they'd need a decoder we don't have.
+        let audioInput: AVAssetWriterInput? = {
+            guard let a = audio, a.formatTag == 1 else {
+                if let a = audio {
+                    NSLog("[VideoTranscoder] audio codec not written (unsupported): "
+                          + "tag=\(a.formatTag) ch=\(a.channels) rate=\(a.sampleRate) "
+                          + "bits=\(a.bitsPerSample) bytes=\(a.samples.count)")
+                }
+                return nil
+            }
+            let layout = Self.makeAudioChannelLayout(channels: a.channels)
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: a.sampleRate,
+                AVNumberOfChannelsKey: a.channels,
+                AVLinearPCMBitDepthKey: a.bitsPerSample,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+                AVChannelLayoutKey: layout as Any,
+            ]
+            let in_ = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+            in_.expectsMediaDataInRealTime = false
+            guard writer.canAdd(in_) else {
+                NSLog("[VideoTranscoder] cannot add audio input (settings rejected)")
+                return nil
+            }
+            writer.add(in_)
+            return in_
+        }()
+
         guard writer.startWriting() else {
             throw TranscodeError(code: "WRITER_START",
                                  message: "AVAssetWriter startWriting failed: \(writer.error?.localizedDescription ?? "?")")
@@ -375,15 +514,16 @@ final class H264Encoder {
         encodingQueue.async { [weak self] in
             guard let self = self else {
                 input.markAsFinished()
+                audioInput?.markAsFinished()
                 writer.finishWriting { doneSemaphore.signal() }
                 return
             }
 
+            // ── Video frames ──
             for (idx, frame) in frames.enumerated() {
                 // Backpressure: wait until the writer pipeline can accept more.
                 while !input.isReadyForMoreMediaData {
                     Thread.sleep(forTimeInterval: 0.005)
-                    // If the writer failed mid-flight, bail out.
                     if writer.status == .failed { break }
                 }
                 if writer.status == .failed { break }
@@ -396,7 +536,21 @@ final class H264Encoder {
                 adaptor.append(px, withPresentationTime: pts)
             }
 
+            // ── Audio ──
+            // Slice the PCM byte stream into per-frame chunks whose duration
+            // matches each video frame (1/fps s), and append them with PTS
+            // aligned to the video timescale. This keeps audio/video in sync
+            // without needing a separate audio clock.
+            if let a = audio, audioInput != nil {
+                self.appendAudio(audio: a,
+                                 frameCount: frames.count,
+                                 fps: fps,
+                                 audioInput: audioInput!,
+                                 timescale: timescale)
+            }
+
             input.markAsFinished()
+            audioInput?.markAsFinished()
             writer.finishWriting { doneSemaphore.signal() }
         }
 
@@ -406,6 +560,162 @@ final class H264Encoder {
             let msg = writer.error?.localizedDescription ?? "unknown"
             throw TranscodeError(code: "WRITER_FAILED", message: "MP4 write failed: \(msg)")
         }
+    }
+
+    /// Append the AVI's PCM audio into the MP4, sliced to match each video
+    /// frame's duration. Each chunk's PTS advances by one frame interval so
+    /// audio stays aligned with video.
+    private func appendAudio(audio: AVIParser.AudioInfo,
+                             frameCount: Int,
+                             fps: Int,
+                             audioInput: AVAssetWriterInput,
+                             timescale: CMTimeScale) {
+        guard fps > 0 else { return }
+        let bytesPerSample = Int(audio.bitsPerSample) / 8
+        let bytesPerFrame = bytesPerSample * Int(audio.channels)
+        guard bytesPerFrame > 0 else { return }
+
+        // Bytes of audio that play during one video frame (1/fps seconds).
+        let bytesPerVideoFrame = Int(Double(audio.sampleRate) * Double(bytesPerFrame) / Double(fps))
+        guard bytesPerVideoFrame > 0 else { return }
+
+        // Round to a whole sample frame so we never split an interleaved sample.
+        let chunkBytes = (bytesPerVideoFrame / bytesPerFrame) * bytesPerFrame
+        guard chunkBytes > 0 else { return }
+
+        let total = audio.samples.count
+        var offset = 0
+        var frameIdx = 0
+        while offset < total {
+            while !audioInput.isReadyForMoreMediaData {
+                Thread.sleep(forTimeInterval: 0.005)
+            }
+            let take = min(chunkBytes, total - offset)
+            // The last chunk may not be a full sample frame; only append whole
+            // frames to keep the PCM stream valid.
+            let aligned = (take / bytesPerFrame) * bytesPerFrame
+            guard aligned > 0 else { break }
+            let chunk = audio.samples.subdata(in: offset..<offset + aligned)
+            let numSamples = aligned / bytesPerFrame
+            let cmBlockBuf = Self.makeBlockBuffer(from: chunk)
+            let pts = CMTime(value: CMTimeValue(frameIdx), timescale: timescale)
+            let duration = CMTime(value: CMTimeValue(1), timescale: timescale)
+            if let cmBlockBuf = cmBlockBuf,
+               let sampleBuf = Self.makeSampleBuffer(blockBuffer: cmBlockBuf,
+                                                     sampleRate: audio.sampleRate,
+                                                     channels: audio.channels,
+                                                     bitsPerSample: audio.bitsPerSample,
+                                                     numSamples: numSamples,
+                                                     pts: pts,
+                                                     duration: duration) {
+                _ = audioInput.append(sampleBuf)
+            }
+            offset += aligned
+            frameIdx += 1
+            if frameIdx >= frameCount { break }
+        }
+    }
+
+    /// Build an AudioChannelLayout for the given channel count (mono/stereo).
+    static func makeAudioChannelLayout(channels: UInt16) -> NSData {
+        var layout = AudioChannelLayout()
+        layout.mChannelLayoutTag = (channels >= 2)
+            ? kAudioChannelLayoutTag_Stereo
+            : kAudioChannelLayoutTag_Mono
+        layout.mNumberChannelDescriptions = 0
+        return Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size) as NSData
+    }
+
+    /// Wrap raw PCM bytes in a CMBlockBuffer. Bytes are copied in (the source
+    /// Data is short-lived), so no custom block source / refcon is needed.
+    static func makeBlockBuffer(from data: Data) -> CMBlockBuffer? {
+        var blockBuffer: CMBlockBuffer?
+        let totalLength = data.count
+        let status = CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: totalLength,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: totalLength,
+            flags: 0,
+            blockBufferOut: &blockBuffer)
+        guard status == kCMBlockBufferNoErr, let bb = blockBuffer else { return nil }
+        let copied = data.withUnsafeBytes { rawBuf -> OSStatus in
+            guard let base = rawBuf.baseAddress else { return kCMBlockBufferBadPointerParameterErr }
+            return CMBlockBufferReplaceDataBytes(with: base,
+                                                  blockBuffer: bb,
+                                                  offsetIntoDestination: 0,
+                                                  dataLength: totalLength)
+        }
+        return copied == kCMBlockBufferNoErr ? bb : nil
+    }
+
+    /// Build a CMSampleBuffer wrapping [numSamples] PCM frames with the given
+    /// PTS. For uncompressed PCM every frame has the same size; we pass a single
+    /// sample-size entry and numSampleSizeEntries == 1 to signal a constant size.
+    static func makeSampleBuffer(blockBuffer: CMBlockBuffer,
+                                 sampleRate: UInt32,
+                                 channels: UInt16,
+                                 bitsPerSample: UInt16,
+                                 numSamples: Int,
+                                 pts: CMTime,
+                                 duration: CMTime) -> CMSampleBuffer? {
+        var asbd = Self.makeASBD(sampleRate: sampleRate,
+                                 channels: channels,
+                                 bitsPerSample: bitsPerSample)
+        var formatDesc: CMAudioFormatDescription?
+        CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                       asbd: &asbd,
+                                       layoutSize: 0,
+                                       layout: nil,
+                                       magicCookieSize: 0,
+                                       magicCookie: nil,
+                                       extensions: nil,
+                                       formatDescriptionOut: &formatDesc)
+        guard let fd = formatDesc else { return nil }
+
+        // For uncompressed PCM every sample has the same size (one frame).
+        let bytesPerFrame = Int(bitsPerSample) / 8 * Int(channels)
+        var sampleSize = bytesPerFrame   // CMSampleBuffer sampleSizeArray is Int
+        var timingInfo = CMSampleTimingInfo(
+            duration: duration,
+            presentationTimeStamp: pts,
+            decodeTimeStamp: .invalid
+        )
+
+        var sampleBuffer: CMSampleBuffer?
+        let status = CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: blockBuffer,
+            formatDescription: fd,
+            sampleCount: numSamples,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timingInfo,
+            sampleSizeEntryCount: 1,   // constant size → one entry
+            sampleSizeArray: &sampleSize,
+            sampleBufferOut: &sampleBuffer)
+        guard status == noErr else {
+            NSLog("[VideoTranscoder] CMSampleBufferCreateReady failed: \(status)")
+            return nil
+        }
+        return sampleBuffer
+    }
+
+    /// AudioStreamBasicDescription for interleaved 16-bit PCM.
+    static func makeASBD(sampleRate: UInt32, channels: UInt16, bitsPerSample: UInt16) -> AudioStreamBasicDescription {
+        let bytesPerFrame = UInt32(bitsPerSample) * UInt32(channels) / 8
+        return AudioStreamBasicDescription(
+            mSampleRate: Float64(sampleRate),
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: bytesPerFrame,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: bytesPerFrame,
+            mChannelsPerFrame: UInt32(channels),
+            mBitsPerChannel: UInt32(bitsPerSample),
+            mReserved: 0)
     }
 
     /// Render a CGImage into a 32BGRA CVPixelBuffer matching the encoder size.

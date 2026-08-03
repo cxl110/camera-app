@@ -26,7 +26,7 @@ class TopToolbar extends StatelessWidget {
             icon: hasFlash ? Icons.flash_on : Icons.flash_off,
             isActive: hasFlash,
             onTap: onFlashToggle,
-            tooltip: '闪光灯',
+            tooltip: 'Flash',
           ),
 
           // Timer button
@@ -34,7 +34,7 @@ class TopToolbar extends StatelessWidget {
             icon: Icons.timer_outlined,
             isActive: false,
             onTap: () {},
-            tooltip: '定时',
+            tooltip: 'Timer',
           ),
 
           const Spacer(),
@@ -58,7 +58,7 @@ class TopToolbar extends StatelessWidget {
             icon: Icons.grid_4x4,
             isActive: true,
             onTap: onGridToggle,
-            tooltip: '网格',
+            tooltip: 'Grid',
           ),
 
           // Settings
@@ -66,7 +66,7 @@ class TopToolbar extends StatelessWidget {
             icon: Icons.tune,
             isActive: false,
             onTap: () {},
-            tooltip: '设置',
+            tooltip: 'Settings',
           ),
         ],
       ),

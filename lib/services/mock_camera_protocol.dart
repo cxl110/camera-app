@@ -81,7 +81,7 @@ class MockCameraProtocol extends CameraProtocol {
       );
 
       if (xfile == null) {
-        throw Exception('用户取消拍照');
+        throw Exception('Capture cancelled by user');
       }
 
       final bytes = await xfile.readAsBytes();
@@ -147,7 +147,7 @@ class MockCameraProtocol extends CameraProtocol {
     // Mock: pick from phone gallery
     List<XFile> xfiles = [];
 
-    // 尝试 pickMultiImage，如果失败则用 pickImage 单张选择
+    // Try pickMultiImage; fall back to pickImage (single) if it fails.
     try {
       xfiles = await _picker.pickMultiImage(
         imageQuality: 85,
@@ -155,7 +155,7 @@ class MockCameraProtocol extends CameraProtocol {
       );
     } catch (e) {
       debugPrint('[MockCamera] pickMultiImage failed: $e');
-      // Fallback: 尝试单张选择
+      // Fallback: try single-image selection
       try {
         final single = await _picker.pickImage(
           source: ImageSource.gallery,
@@ -170,7 +170,7 @@ class MockCameraProtocol extends CameraProtocol {
     }
 
     if (xfiles.isEmpty) {
-      // 如果之前已经有缓存的照片，返回缓存
+      // If there are previously cached photos, return the cache.
       if (_storage.isNotEmpty) {
         final photos = _storage
             .skip(offset)
