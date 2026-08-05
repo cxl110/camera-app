@@ -341,7 +341,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
     if (_photos.isEmpty) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.photo_library_outlined, size: 64,
-            color: Colors.white.withValues(alpha: 0.12)),
+            color: Colors.white.withOpacity(0.12)),
         const SizedBox(height: 16),
         const Text('No photos on camera', style: TextStyle(color: Colors.white38, fontSize: 16)),
       ]));
@@ -389,7 +389,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.movie, color: const Color(0xFFD89A0F).withValues(alpha: 0.9), size: 36),
+                  Icon(Icons.movie, color: const Color(0xFFD89A0F).withOpacity(0.9), size: 36),
                   const SizedBox(height: 6),
                   const Text('Video',
                     style: TextStyle(color: Colors.white38, fontSize: 11)),
@@ -401,13 +401,13 @@ class _GalleryScreenState extends State<GalleryScreen> {
           Container(color: const Color(0xFF1A1A2E),
             child: Center(child: Icon(
               Icons.image,
-              color: Colors.white.withValues(alpha: 0.2), size: 32))),
+              color: Colors.white.withOpacity(0.2), size: 32))),
         if (isVideo)
           Positioned(bottom: 4, right: 4,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.7),
+                color: Colors.black.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(3)),
               child: const Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.play_arrow, color: Colors.white, size: 14),
@@ -420,19 +420,19 @@ class _GalleryScreenState extends State<GalleryScreen> {
               width: 22, height: 22,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isSelected ? const Color(0xFFD89A0F) : Colors.black.withValues(alpha: 0.5),
+                color: isSelected ? const Color(0xFFD89A0F) : Colors.black.withOpacity(0.5),
                 border: Border.all(
                   color: isSelected ? const Color(0xFFD89A0F) : Colors.white38, width: 2)),
               child: isSelected ? const Icon(Icons.check, color: Colors.black, size: 14) : null)),
         if (isSelected)
-          Positioned.fill(child: Container(color: Colors.white.withValues(alpha: 0.15))),
+          Positioned.fill(child: Container(color: Colors.white.withOpacity(0.15))),
       ]),
     );
   }
 
   Widget _buildDownloadOverlay() {
     return Positioned.fill(
-      child: Container(color: Colors.black.withValues(alpha: 0.85),
+      child: Container(color: Colors.black.withOpacity(0.85),
         child: Center(child: Container(width: 280, padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: const Color(0xFF1A1A2E), borderRadius: BorderRadius.circular(16)),

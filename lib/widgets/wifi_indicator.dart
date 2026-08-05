@@ -64,24 +64,24 @@ class _WifiPainter extends CustomPainter {
     final bottomY = size.height;
 
     // Dot at bottom
-    dotPaint.color = Colors.white.withValues(alpha: 0.9);
+    dotPaint.color = Colors.white.withOpacity(0.9);
     canvas.drawCircle(Offset(centerX, bottomY - 2), 2.5, dotPaint);
 
     // Arc 1 (smallest, top)
     if (opacity1 > 0) {
-      paint.color = color.withValues(alpha: opacity1);
+      paint.color = color.withOpacity(opacity1);
       _drawArc(canvas, size, paint, 0.35, -0.8);
     }
 
     // Arc 2 (medium)
     if (opacity2 > 0) {
-      paint.color = color.withValues(alpha: opacity2);
+      paint.color = color.withOpacity(opacity2);
       _drawArc(canvas, size, paint, 0.55, -0.85);
     }
 
     // Arc 3 (largest, bottom)
     if (opacity3 > 0) {
-      paint.color = color.withValues(alpha: opacity3);
+      paint.color = color.withOpacity(opacity3);
       _drawArc(canvas, size, paint, 0.75, -0.9);
     }
   }

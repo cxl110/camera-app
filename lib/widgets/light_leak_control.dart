@@ -67,9 +67,9 @@ class LightLeakControl extends StatelessWidget {
                   value: enabled,
                   onChanged: onToggle,
                   activeColor: const Color(0xFFD89A0F),
-                  activeTrackColor: const Color(0xFFD89A0F).withValues(alpha: 0.3),
+                  activeTrackColor: const Color(0xFFD89A0F).withOpacity(0.3),
                   inactiveThumbColor: Colors.white38,
-                  inactiveTrackColor: Colors.white.withValues(alpha: 0.08),
+                  inactiveTrackColor: Colors.white.withOpacity(0.08),
                 ),
               ),
             ],
@@ -105,9 +105,9 @@ class LightLeakControl extends StatelessWidget {
               trackHeight: 3,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
               activeTrackColor: const Color(0xFFD89A0F),
-              inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+              inactiveTrackColor: Colors.white.withOpacity(0.1),
               thumbColor: const Color(0xFFD89A0F),
-              overlayColor: const Color(0xFFD89A0F).withValues(alpha: 0.1),
+              overlayColor: const Color(0xFFD89A0F).withOpacity(0.1),
             ),
             child: Slider(
               value: enabled ? intensity : 0,
@@ -144,13 +144,13 @@ class _StyleChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color: isSelected && enabled
-              ? const Color(0xFFD89A0F).withValues(alpha: 0.2)
-              : Colors.white.withValues(alpha: 0.04),
+              ? const Color(0xFFD89A0F).withOpacity(0.2)
+              : Colors.white.withOpacity(0.04),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isSelected && enabled
                 ? const Color(0xFFD89A0F)
-                : Colors.white.withValues(alpha: 0.1),
+                : Colors.white.withOpacity(0.1),
             width: isSelected ? 1.5 : 1,
           ),
         ),
@@ -159,7 +159,7 @@ class _StyleChip extends StatelessWidget {
           style: TextStyle(
             color: isSelected && enabled
                 ? const Color(0xFFD89A0F)
-                : Colors.white.withValues(alpha: enabled ? 0.5 : 0.2),
+                : Colors.white.withOpacity(enabled ? 0.5 : 0.2),
             fontSize: 11,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
             letterSpacing: 1.2,

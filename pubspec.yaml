@@ -17,33 +17,23 @@ dependencies:
 
   # Image handling
   image_picker: ^1.1.2
-  image: ^4.2.0
-  image_cropper: ^8.0.2
-  cached_network_image: ^3.4.1
-  photo_view: ^0.15.0
+  image: ^4.5.0
 
   # File & path
   path_provider: ^2.1.4
   path: ^1.9.0
 
-  # Camera / WiFi transfer
+  # Camera / WiFi transfer (HTTP is pure Dart, works on ohos)
   http: ^1.2.2
-  connectivity_plus: ^6.1.0
 
-  # Gallery save (system photo library)
+  # Gallery save (system photo library) — needs ohos backend
   gal: ^2.3.0
 
-  # Sharing logs / files via system share sheet
+  # Sharing logs / files via system share sheet — needs ohos backend (stub first)
   share_plus: ^10.1.4
 
-  # CoreML inference is handled via native platform channel (ios/Runner/CoreMLPlugin.swift)
-
-  # Permissions
-  permission_handler: ^11.3.1
-
-  # Storage
-  sqflite: ^2.4.1
-  shared_preferences: ^2.3.3
+  # CoreML/TFLite inference is handled via native platform channel
+  # (ios/Runner/CoreMLPlugin.swift, android/.../CoreMLPlugin.kt)
 
   # State management
   provider: ^6.1.2
@@ -56,7 +46,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  # flutter_lints 4.x: 5.x requires Dart 3.7+, ohos fork is Flutter 3.27.4 (Dart 3.6)
+  flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.1
 
 flutter:

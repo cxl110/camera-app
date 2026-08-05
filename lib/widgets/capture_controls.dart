@@ -106,8 +106,8 @@ class _ThumbnailButton extends StatelessWidget {
       height: 44,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-        color: Colors.white.withValues(alpha: 0.05),
+        border: Border.all(color: Colors.white.withOpacity(0.2)),
+        color: Colors.white.withOpacity(0.05),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(5),
@@ -116,7 +116,7 @@ class _ThumbnailButton extends StatelessWidget {
             : Icon(
                 Icons.photo_outlined,
                 size: 20,
-                color: Colors.white.withValues(alpha: 0.2),
+                color: Colors.white.withOpacity(0.2),
               ),
       ),
     );
@@ -160,7 +160,7 @@ class _ShutterButtonState extends State<_ShutterButton> {
               ? []
               : [
                   BoxShadow(
-                    color: Colors.white.withValues(alpha: enabled ? 0.3 : 0.05),
+                    color: Colors.white.withOpacity(enabled ? 0.3 : 0.05),
                     blurRadius: 12,
                     spreadRadius: 1,
                   ),
@@ -237,7 +237,7 @@ class _TimerButtonState extends State<_TimerButton> {
           color: counting
               ? const Color(0xFFD89A0F)
               : (enabled
-                  ? Colors.white.withValues(alpha: 0.85)
+                  ? Colors.white.withOpacity(0.85)
                   : const Color(0xFF444444)),
           boxShadow: _pressed
               ? []
@@ -246,7 +246,7 @@ class _TimerButtonState extends State<_TimerButton> {
                     color: (counting
                             ? const Color(0xFFD89A0F)
                             : Colors.white)
-                        .withValues(alpha: enabled ? 0.2 : 0.03),
+                        .withOpacity(enabled ? 0.2 : 0.03),
                     blurRadius: 8,
                     spreadRadius: 0.5,
                   ),

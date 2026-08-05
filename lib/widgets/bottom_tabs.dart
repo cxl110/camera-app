@@ -66,7 +66,7 @@ class _TabItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color color = isActive
         ? const Color(0xFFD89A0F)
-        : Colors.white.withValues(alpha: 0.35);
+        : Colors.white.withOpacity(0.35);
 
     return GestureDetector(
       onTap: onTap,

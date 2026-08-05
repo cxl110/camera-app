@@ -150,7 +150,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
               hintText: 'http://192.168.122.1:8080',
-              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
               filled: true,
               fillColor: const Color(0xFF0D0D1A),
               border: OutlineInputBorder(
@@ -176,7 +176,7 @@ class _CameraConnectScreenState extends State<CameraConnectScreen> {
                   label: Text(isConnected ? 'Disconnect' : 'Auto detect'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white60,
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+                    side: BorderSide(color: Colors.white.withOpacity(0.2)),
                     padding: const EdgeInsets.all(14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),

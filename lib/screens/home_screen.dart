@@ -486,7 +486,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onPressed: _isConnected ? _onOpenGallery : null,
             icon: Icon(
               Icons.folder_outlined,
-              color: Colors.white.withValues(alpha: _isConnected ? 0.7 : 0.2),
+              color: Colors.white.withOpacity(_isConnected ? 0.7 : 0.2),
               size: 22,
             ),
             tooltip: 'Camera Photos',
@@ -678,7 +678,7 @@ class _IpInputDialogState extends State<_IpInputDialog> {
               labelText: 'PC IP Address',
               hintText: 'e.g. 192.168.1.114',
               labelStyle: const TextStyle(color: Colors.white38),
-              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
               enabledBorder: const OutlineInputBorder(
                 borderSide: BorderSide(color: Colors.white24),
               ),

@@ -89,7 +89,7 @@ class CameraPreview extends StatelessWidget {
           Text(
             'Camera Disconnected',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.3),
+              color: Colors.white.withOpacity(0.3),
               fontSize: 14,
               fontWeight: FontWeight.w300,
             ),
@@ -98,7 +98,7 @@ class CameraPreview extends StatelessWidget {
           Text(
             'Connect to camera WiFi to start',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.15),
+              color: Colors.white.withOpacity(0.15),
               fontSize: 12,
             ),
           ),
@@ -113,7 +113,7 @@ class _CameraOutlinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.25)
+      ..color = Colors.white.withOpacity(0.25)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
 

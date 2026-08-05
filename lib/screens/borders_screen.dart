@@ -64,11 +64,11 @@ class _BordersScreenState extends State<BordersScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.wifi_off, size: 48,
-                  color: Colors.white.withValues(alpha: 0.2)),
+                  color: Colors.white.withOpacity(0.2)),
               const SizedBox(height: 16),
               Text('Please connect to camera WiFi first',
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.3), fontSize: 15)),
+                      color: Colors.white.withOpacity(0.3), fontSize: 15)),
             ],
           ),
         ),
@@ -140,14 +140,14 @@ class _BordersScreenState extends State<BordersScreen> {
             icon: Icon(Icons.save_alt,
                 color: (imageService.currentPhoto != null && !_isSaving
                     ? Colors.white
-                    : Colors.white.withValues(alpha: 0.2)).withValues(alpha: 0.7),
+                    : Colors.white.withOpacity(0.2)).withOpacity(0.7),
                 size: 22),
             onPressed: (imageService.currentPhoto != null && !_isSaving) ? _onSave : null,
             tooltip: 'Save',
           ),
           IconButton(
             icon: Icon(Icons.folder_outlined,
-                color: Colors.white.withValues(alpha: 0.7), size: 22),
+                color: Colors.white.withOpacity(0.7), size: 22),
             onPressed: _onOpenAlbum,
             tooltip: 'Album',
           ),
@@ -190,14 +190,14 @@ class _BordersScreenState extends State<BordersScreen> {
             if (!imageService.hasCurrentPhoto && _selectedBorder == null)
               Center(
                 child: Icon(Icons.image_outlined, size: 64,
-                    color: Colors.white.withValues(alpha: 0.1)),
+                    color: Colors.white.withOpacity(0.1)),
               ),
 
             // ── Saving progress overlay (spinner only, like EFFECTS) ──
             if (_isSaving)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withValues(alpha: 0.5),
+                  color: Colors.black.withOpacity(0.5),
                   child: Center(
                     child: SizedBox(
                       width: indicatorSize,
@@ -261,17 +261,17 @@ class _BordersScreenState extends State<BordersScreen> {
                     border: Border.all(
                       color: isSelected
                           ? const Color(0xFFD89A0F)
-                          : Colors.white.withValues(alpha: 0.08),
+                          : Colors.white.withOpacity(0.08),
                       width: isSelected ? 2 : 1,
                     ),
-                    color: Colors.white.withValues(alpha: 0.03),
+                    color: Colors.white.withOpacity(0.03),
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(5),
                     child: isNone
                         ? Center(
                             child: Icon(Icons.close, size: 20,
-                                color: isSelected ? const Color(0xFFD89A0F) : Colors.white.withValues(alpha: 0.3)),
+                                color: isSelected ? const Color(0xFFD89A0F) : Colors.white.withOpacity(0.3)),
                           )
                         : Image.asset(
                             'assets/frames/$file',
@@ -279,7 +279,7 @@ class _BordersScreenState extends State<BordersScreen> {
                             cacheWidth: 144, // Downsample for thumbnail
                             errorBuilder: (_, __, ___) => Center(
                               child: Icon(Icons.crop_free, size: 16,
-                                  color: Colors.white.withValues(alpha: 0.15)),
+                                  color: Colors.white.withOpacity(0.15)),
                             ),
                           ),
                   ),
@@ -322,9 +322,9 @@ class _BordersScreenState extends State<BordersScreen> {
               trackHeight: 3,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
               activeTrackColor: const Color(0xFFD89A0F),
-              inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+              inactiveTrackColor: Colors.white.withOpacity(0.1),
               thumbColor: const Color(0xFFD89A0F),
-              overlayColor: const Color(0xFFD89A0F).withValues(alpha: 0.1),
+              overlayColor: const Color(0xFFD89A0F).withOpacity(0.1),
             ),
             child: Slider(
               value: _borderThickness,

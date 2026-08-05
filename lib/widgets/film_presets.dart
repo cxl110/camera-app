@@ -103,7 +103,7 @@ class _PresetCard extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isSelected ? const Color(0xFFD89A0F) : Colors.white.withValues(alpha: 0.08),
+            color: isSelected ? const Color(0xFFD89A0F) : Colors.white.withOpacity(0.08),
             width: isSelected ? 2 : 1,
           ),
         ),
@@ -132,8 +132,8 @@ class _PresetCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 4),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? const Color(0xFFD89A0F).withValues(alpha: 0.15)
-                    : Colors.white.withValues(alpha: 0.03),
+                    ? const Color(0xFFD89A0F).withOpacity(0.15)
+                    : Colors.white.withOpacity(0.03),
                 borderRadius: const BorderRadius.vertical(bottom: Radius.circular(4)),
               ),
               child: Text(
@@ -159,12 +159,12 @@ class _PresetCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       height: double.infinity,
-      color: preset.sampleColor.withValues(alpha: 0.6),
+      color: preset.sampleColor.withOpacity(0.6),
       child: Center(
         child: Icon(
           Icons.filter_vintage,
           size: 18,
-          color: Colors.white.withValues(alpha: 0.3),
+          color: Colors.white.withOpacity(0.3),
         ),
       ),
     );

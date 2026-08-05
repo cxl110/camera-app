@@ -171,11 +171,11 @@ class _EffectsScreenState extends State<EffectsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.wifi_off, size: 48, color: Colors.white.withValues(alpha: 0.2)),
+              Icon(Icons.wifi_off, size: 48, color: Colors.white.withOpacity(0.2)),
               const SizedBox(height: 16),
               Text(
                 'Please connect to camera WiFi first',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 15),
+                style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 15),
               ),
             ],
           ),
@@ -302,12 +302,12 @@ class _EffectsScreenState extends State<EffectsScreen> {
           ),
           const Spacer(),
           IconButton(
-            icon: Icon(Icons.save_alt, color: Colors.white.withValues(alpha: 0.7), size: 22),
+            icon: Icon(Icons.save_alt, color: Colors.white.withOpacity(0.7), size: 22),
             onPressed: (imageService.currentPhoto != null && !_isSaving) ? _onSaveFiltered : null,
             tooltip: 'Save',
           ),
           IconButton(
-            icon: Icon(Icons.folder_outlined, color: Colors.white.withValues(alpha: 0.7), size: 22),
+            icon: Icon(Icons.folder_outlined, color: Colors.white.withOpacity(0.7), size: 22),
             onPressed: _onOpenAlbum,
             tooltip: 'Album',
           ),
@@ -345,7 +345,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
               child: Icon(
                 Icons.image_outlined,
                 size: 64,
-                color: Colors.white.withValues(alpha: 0.1),
+                color: Colors.white.withOpacity(0.1),
               ),
             ),
 
@@ -357,7 +357,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
+                  color: Colors.black.withOpacity(0.6),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -398,7 +398,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
+                  color: Colors.black.withOpacity(0.5),
                   borderRadius: BorderRadius.circular(7),
                 ),
                 child: Center(
@@ -430,7 +430,7 @@ class _EffectsScreenState extends State<EffectsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.65),
+        color: Colors.black.withOpacity(0.65),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
@@ -732,7 +732,7 @@ class _BeforeAfterChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: isActive
               ? const Color(0xFFD89A0F)
-              : Colors.black.withValues(alpha: 0.4),
+              : Colors.black.withOpacity(0.4),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Text(
