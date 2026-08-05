@@ -52,3 +52,4 @@ build_artifacts/
 *.ipa
 tools/test_upscale_*.jpg
 tools/logs_received/
+.hvigor/
