@@ -13,13 +13,16 @@ import 'app_log.dart';
 /// Provides live view (MJPEG stream), photo capture, file listing,
 /// download, thumbnail, delete, and RTC time sync.
 ///
-/// Security (v1.5): Token-based auth in User-Agent header + honeypot heartbeat.
+/// Security (API v1.7): token-based auth in the User-Agent header.
+/// `/heartbeat` is a plain heartbeat (no longer a honeypot) and there is **no
+/// permanent lockout** — the worst case is a 60 s temporary lock that expires
+/// on its own, and the device self-heals its clock from rejected tokens.
 /// Spec: C:\H3\APP\HTTPAPI\V821CAM-HTTP-API.md
 class HttpCameraProtocol extends CameraProtocol {
   static const _defaultBaseUrl = 'http://192.168.5.1';
   static const _timeout = Duration(seconds: 10);
 
-  // Token constants (from API spec v1.5)
+  // Token algorithm constants (API v1.7 §安全鉴权 — unchanged since v1.5)
   static const _tokenMul = 2654435761;
   static const _tokenAdd = 1737326273;
   static const _tokenMask = 0xFFFFFFFF;
@@ -68,17 +71,137 @@ class HttpCameraProtocol extends CameraProtocol {
 
   // ── Token ──
 
-  /// Compute the 8-char hex token based on current local time.
+  /// Device-clock offset in seconds: `deviceTime - phoneTime`.
   ///
-  /// Algorithm: seed = floor(unixtime / 60), token = (seed * A + B) & 0xFFFFFFFF
-  static String _computeToken() {
-    final seed = DateTime.now().millisecondsSinceEpoch ~/ 60000;
+  /// The token must be computed from the CAMERA's clock, because that is what
+  /// the firmware validates it against (API v1.7: ±10 min window, 21 candidate
+  /// minutes). The phone's clock is only used as a monotonic reference: after
+  /// every `/rtc` we learn the device's time from the response and derive the
+  /// token from `phoneNow + offset`, so a wrong/drifting phone clock can no
+  /// longer poison every authenticated request (heartbeat / capture / sound /
+  /// delete).
+  ///
+  /// v1.7 also self-heals the device clock from rejected tokens, but that only
+  /// helps when we send phone-based tokens; tracking the device clock is the
+  /// more robust choice and additionally keeps `/rtc` from overwriting a good
+  /// device RTC with a bad phone date.
+  int _deviceTimeOffsetSec = 0;
+  bool _timeBaseSynced = false;
+
+  /// Compute the 8-char hex token from the device time base.
+  ///
+  /// Algorithm (API v1.6 §安全鉴权): seed = floor(unixtime / 60),
+  /// token = (seed * A + B) & 0xFFFFFFFF.
+  String _computeToken() {
+    final phoneSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final deviceSec = _timeBaseSynced ? phoneSec + _deviceTimeOffsetSec : phoneSec;
+    final seed = deviceSec ~/ 60;
     final token = (seed * _tokenMul + _tokenAdd) & _tokenMask;
     return token.toRadixString(16).padLeft(8, '0');
   }
 
   /// Build the User-Agent header value with embedded token.
-  static String _userAgent() => 'ZIVIGo/1.0 (${_computeToken()})';
+  String _userAgent() => 'ZIVIGo/1.0 (${_computeToken()})';
+
+  /// Parse the device clock out of a `/rtc` response body.
+  ///
+  /// Response shape: `{"status":"ok","time":"2026-10-16 18:52:20"}` — the
+  /// device reports its own local time, which is the same clock its token
+  /// window is based on.
+  DateTime? _parseDeviceTime(String body) {
+    try {
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final raw = json['time'] as String?;
+      if (raw == null) return null;
+      return DateTime.tryParse(raw.trim().replaceFirst(' ', 'T'));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Learn the device clock from a `/rtc` response so tokens stop depending on
+  /// the phone's absolute time.
+  void _adoptDeviceTime(String body) {
+    final deviceTime = _parseDeviceTime(body);
+    if (deviceTime == null) return;
+
+    final offset = deviceTime.millisecondsSinceEpoch ~/ 1000 -
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    _deviceTimeOffsetSec = offset;
+    _timeBaseSynced = true;
+    AppLog.info('HttpCam',
+        'Time base synced to device clock (offset=${offset}s, token=${_computeToken()})');
+  }
+
+  /// A `/rtc` request is already in flight — don't stack them.
+  bool _rtcInFlight = false;
+
+  /// Throttle for re-syncing the time base after an auth rejection.
+  DateTime _lastAuthResync = DateTime(2000);
+
+  /// Broadcasts `true` when the camera rejects our token (HTTP 403).
+  ///
+  /// The UI uses this to explain why live view / the sound switch are dead
+  /// instead of silently retrying. Note this is NOT a connection loss: `/info`
+  /// and `/stream` still answer, only token-checked endpoints refuse.
+  final StreamController<bool> _authFailureCtrl = StreamController<bool>.broadcast();
+
+  /// Stream of token-rejection notifications (true = rejected, false = recovered).
+  Stream<bool> get authFailureStream => _authFailureCtrl.stream;
+
+  /// Device is inside its 60 s temporary lockout (`403 Locked`).
+  ///
+  /// API v1.7: 10 consecutive token failures lock every request for 60 s, then
+  /// the device unlocks by itself (and any correct token unlocks immediately).
+  /// There is NO permanent lockout in v1.7 — hitting this is recoverable, the
+  /// only sane response is to wait out the window instead of retrying.
+  DateTime _tempLockUntil = DateTime(2000);
+
+  /// True while the device is expected to answer `403 Locked`.
+  bool get _isTempLocked => DateTime.now().isBefore(_tempLockUntil);
+
+  /// v1.7: the body distinguishes `{"error":"Locked"}` (temp lock) from
+  /// `{"error":"Forbidden"}` (token wrong). Both are HTTP 403.
+  static bool _bodyIsTempLock(String body) =>
+      body.toLowerCase().contains('locked');
+
+  /// Called whenever an authenticated request comes back 403.
+  ///
+  /// Handles the two v1.7 flavours differently:
+  /// - `403 Locked` → device is in the 60 s lockout; record the deadline and
+  ///   back off. Retrying cannot help and only extends the pain.
+  /// - `403 Forbidden` → our token was wrong. Re-read the device clock via
+  ///   `/rtc` (unauthenticated, so it works even when locked) and let the
+  ///   caller retry: v1.7 self-heals the device clock from two consecutive
+  ///   rejected tokens, so a bounded retry is genuinely useful now.
+  void _onAuthRejected(String where, {String body = ''}) {
+    final locked = _bodyIsTempLock(body);
+    AppLog.info('HttpCam',
+        'Auth rejected (403${locked ? " Locked" : ""}) on $where — '
+        'token=${_computeToken()}, offset=${_deviceTimeOffsetSec}s, '
+        'synced=$_timeBaseSynced, body=$body');
+
+    if (locked) {
+      // 60 s from the first rejection is enough; re-arming on every rejected
+      // request would push the deadline out forever while we keep polling.
+      if (!_isTempLocked) {
+        _tempLockUntil = DateTime.now().add(const Duration(seconds: 60));
+        AppLog.info('HttpCam',
+            'Device temp-lock detected — pausing token-checked calls for 60s');
+      }
+    } else {
+      // Plain token mismatch: re-learn the device clock (also gives the device
+      // its second self-heal sample). Throttled so a burst of 403s from
+      // parallel requests doesn't turn into a burst of /rtc calls.
+      final now = DateTime.now();
+      if (now.difference(_lastAuthResync).inSeconds >= 10) {
+        _lastAuthResync = now;
+        syncRtc();
+      }
+    }
+
+    if (!_authFailureCtrl.isClosed) _authFailureCtrl.add(true);
+  }
 
   /// HTTP headers for authenticated requests.
   Map<String, String> get _authHeaders => {'User-Agent': _userAgent()};
@@ -210,27 +333,43 @@ class HttpCameraProtocol extends CameraProtocol {
     AppLog.info('HttpCam', 'Security timers stopped');
   }
 
-  /// Send honeypot heartbeat with token.
+  /// Send the 30 s heartbeat with token.
   ///
   /// The heartbeat is the ground-truth signal that the camera is alive: the
-  /// token only validates on a running camera, so a refused/failed heartbeat
-  /// means the device is gone. On failure while we think we're connected,
-  /// emit a disconnect so the UI stops retrying against a dead camera.
+  /// token only validates on a running camera, so a network-level failure means
+  /// the device is gone → emit a disconnect so the UI stops retrying.
+  ///
+  /// API v1.7: `/heartbeat` is **no longer a honeypot** and there is **no
+  /// permanent lockout**. A 403 here is an ordinary auth rejection (temp lock,
+  /// auto-expiring after 60 s), so it must not be treated as fatal.
   Future<void> _sendHeartbeat() async {
+    // Skip while the device is temp-locked: the request is guaranteed to fail
+    // and would only re-arm the 60 s window.
+    if (_isTempLocked) {
+      AppLog.info('HttpCam', 'Heartbeat skipped (device temp-locked)');
+      return;
+    }
     final token = _computeToken();
     try {
       final request = http.Request('GET', Uri.parse('$baseUrl/heartbeat'));
       request.headers['User-Agent'] = 'ZIVIGo/1.0 ($token)';
       final response = await _withSlot(() =>
           _client.send(request).timeout(const Duration(seconds: 3)));
-      // Drain the response body
-      await response.stream.drain();
+      final body = await response.stream.bytesToString();
       if (response.statusCode == 200) {
         AppLog.info('HttpCam', 'Heartbeat OK (token=$token)');
         _connectionFailStreak = 0; // camera is alive — reset streak
+        if (!_authFailureCtrl.isClosed) _authFailureCtrl.add(false);
+      } else if (response.statusCode == 403) {
+        AppLog.info('HttpCam',
+            'Heartbeat REJECTED (token=$token, HTTP 403, body=$body)');
+        // Camera is up but refused the token: re-sync the device clock / back
+        // off on temp lock. Both cases are recoverable in v1.7.
+        _onAuthRejected('heartbeat', body: body);
       } else {
-        AppLog.info('HttpCam', 'Heartbeat REJECTED (token=$token, HTTP ${response.statusCode})');
-        // Rejected (likely 403) = camera is up but token wrong; not a disconnect.
+        AppLog.info(
+            'HttpCam', 'Heartbeat rejected (token=$token, HTTP ${response.statusCode})');
+        // Rejected = camera is up; not a disconnect.
       }
     } catch (e) {
       AppLog.info('HttpCam', 'Heartbeat FAILED (token=$token): $e');
@@ -275,7 +414,23 @@ class HttpCameraProtocol extends CameraProtocol {
         );
 
         if (_liveViewResponse!.statusCode != 200) {
-          throw Exception('Live view unavailable: HTTP ${_liveViewResponse!.statusCode}');
+          final code = _liveViewResponse!.statusCode;
+          if (code == 403) {
+            // Read the body to tell "token wrong" from "device temp-locked".
+            final body = await _liveViewResponse!.stream
+                .bytesToString()
+                .timeout(const Duration(seconds: 2),
+                    onTimeout: () => '');
+            _onAuthRejected('live view', body: body);
+            final locked = _bodyIsTempLock(body);
+            throw CameraAuthException(
+              locked
+                  ? 'Camera is temporarily locked (60s) after repeated token failures'
+                  : 'Camera rejected the access token (HTTP 403)',
+              locked: locked,
+            );
+          }
+          throw Exception('Live view unavailable: HTTP $code');
         }
 
         AppLog.info('HttpCam',
@@ -497,26 +652,50 @@ class HttpCameraProtocol extends CameraProtocol {
 
   // ── RTC Time Sync ──
 
-  /// Sync phone time to camera RTC.
+  /// Sync phone time to camera RTC and — crucially — learn the camera's clock.
   ///
-  /// Called automatically on connection and every 3 minutes thereafter.
-  /// Also callable manually. Fails silently — non-critical operation.
-  Future<void> syncRtc() async {
+  /// Called automatically on connection and every 3 minutes thereafter, and
+  /// retried with backoff on failure. `/rtc` is unauthenticated, so this is the
+  /// only reliable way to bootstrap the token when the phone clock and the
+  /// device clock disagree: the response carries the device's own time, which
+  /// we adopt as the token time base (see [_deviceTimeOffsetSec]).
+  Future<void> syncRtc({int attempts = 3}) async {
+    if (_rtcInFlight) return;
+    _rtcInFlight = true;
     try {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final body = jsonEncode({'timestamp': now});
-      AppLog.info('HttpCam', 'RTC sync: POST /rtc body=$body');
-      // /rtc is unauthenticated per spec, but send User-Agent anyway —
-      // some camera firmware versions may reject requests without ZIVIGo UA.
-      final response = await _withSlot(() => _client.post(
-        Uri.parse('$baseUrl/rtc'),
-        headers: {'Content-Type': 'application/json', 'User-Agent': _userAgent()},
-        body: body,
-      ).timeout(const Duration(seconds: 3)));
-      AppLog.info('HttpCam', 'RTC synced: timestamp=$now (HTTP ${response.statusCode}, body=${response.body})');
-    } catch (e) {
-      // Silently ignore — RTC sync is best-effort
-      AppLog.info('HttpCam', 'RTC sync failed: $e');
+      for (var attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+          final body = jsonEncode({'timestamp': now});
+          AppLog.info('HttpCam',
+              'RTC sync: POST /rtc body=$body${attempt > 1 ? " (retry $attempt)" : ""}');
+          // /rtc is unauthenticated per spec, but send User-Agent anyway —
+          // some camera firmware versions may reject requests without ZIVIGo UA.
+          final response = await _withSlot(() => _client.post(
+            Uri.parse('$baseUrl/rtc'),
+            headers: {'Content-Type': 'application/json', 'User-Agent': _userAgent()},
+            body: body,
+          ).timeout(const Duration(seconds: 3)));
+
+          AppLog.info('HttpCam',
+              'RTC synced: timestamp=$now (HTTP ${response.statusCode}, body=${response.body})');
+          if (response.statusCode == 200) {
+            _adoptDeviceTime(response.body);
+          }
+          return;
+        } catch (e) {
+          AppLog.info('HttpCam', 'RTC sync failed: $e');
+          if (attempt < attempts) {
+            // The first /rtc after a reconnect often loses the connection while
+            // the device is still bringing its HTTP server up. Retry instead of
+            // leaving the token time base wrong — a wrong base makes EVERY
+            // authenticated request 403 and can trip the device's L1 lock.
+            await Future.delayed(Duration(milliseconds: 600 * attempt));
+          }
+        }
+      }
+    } finally {
+      _rtcInFlight = false;
     }
   }
 
@@ -712,6 +891,111 @@ class HttpCameraProtocol extends CameraProtocol {
       debugPrint('[HttpCamera] deletePhoto error: $e');
       return false;
     }
+  }
+
+  // ── Sound Effect Switch (API v1.6 §12) ──
+
+  /// GET /sound — query the photo / recording-start beep switch.
+  ///
+  /// Returns null when the camera can't be reached. Only a genuine 404/501
+  /// means "firmware has no /sound endpoint" ([SoundSetting.unsupported]); a
+  /// 403 is a TOKEN problem and is rethrown as [CameraAuthException] so the UI
+  /// can say so instead of greying the switch out forever.
+  @override
+  Future<SoundSetting?> getSoundEnabled() async {
+    try {
+      final response = await _withSlot(() => _client
+          .get(Uri.parse('$baseUrl/sound'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 5)));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final enabled = _parseBool(body['enabled']) ?? true;
+        AppLog.info('HttpCam', 'getSoundEnabled: enabled=$enabled');
+        return SoundSetting(enabled: enabled);
+      }
+
+      AppLog.info('HttpCam', 'getSoundEnabled: HTTP ${response.statusCode}');
+      if (response.statusCode == 403) {
+        // Camera is up but the token was refused — NOT "unsupported firmware".
+        _onAuthRejected('get /sound', body: response.body);
+        final locked = _bodyIsTempLock(response.body);
+        throw CameraAuthException(
+          locked
+              ? 'Camera is temporarily locked (60s)'
+              : 'Camera rejected the access token (HTTP 403)',
+          locked: locked,
+        );
+      }
+      // 404/501 → firmware predates the /sound API.
+      return SoundSetting.unsupported;
+    } on CameraAuthException {
+      rethrow;
+    } catch (e) {
+      AppLog.info('HttpCam', 'getSoundEnabled failed: $e');
+      return null;
+    }
+  }
+
+  /// POST /sound — set the photo / recording-start beep switch.
+  ///
+  /// The device persists the value (`/mnt/UDISK/sound_enabled`); when it could
+  /// not be written the response reports `persisted: false`, which is surfaced
+  /// to the caller so it can warn the user.
+  @override
+  Future<SoundSetting> setSoundEnabled(bool enabled) async {
+    AppLog.info('HttpCam', 'setSoundEnabled: $enabled (token=${_computeToken()})');
+    final response = await _withSlot(() => _client
+        .post(
+          Uri.parse('$baseUrl/sound'),
+          headers: {
+            ..._authHeaders,
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'enabled': enabled}),
+        )
+        .timeout(const Duration(seconds: 5)));
+
+    if (response.statusCode != 200) {
+      AppLog.info('HttpCam',
+          'setSoundEnabled FAILED: HTTP ${response.statusCode} body=${response.body}');
+      if (response.statusCode == 403) {
+        _onAuthRejected('post /sound', body: response.body);
+        final locked = _bodyIsTempLock(response.body);
+        throw CameraAuthException(
+          locked
+              ? 'Camera is temporarily locked (60s) — try again shortly'
+              : 'Camera rejected the access token (HTTP 403)',
+          locked: locked,
+        );
+      }
+      // 404 → firmware older than v1.6 (no /sound endpoint); 403 → token refused.
+      if (response.statusCode == 404 || response.statusCode == 501) {
+        throw const SoundControlException(
+            'Camera firmware has no sound switch (/sound) — update firmware');
+      }
+      throw SoundControlException(
+          'Camera rejected the sound setting (HTTP ${response.statusCode})');
+    }
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final applied = _parseBool(body['enabled']) ?? enabled;
+    final persisted = body['persisted'] as bool? ?? true;
+    AppLog.info('HttpCam', 'setSoundEnabled OK: enabled=$applied persisted=$persisted');
+    return SoundSetting(enabled: applied, persisted: persisted);
+  }
+
+  /// Accept `true`/`false` and the weak-typed numeric `1`/`0` the firmware
+  /// also sends for compatibility. Returns null when unrecognised.
+  static bool? _parseBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final v = value.trim().toLowerCase();
+      if (v == 'true' || v == '1') return true;
+      if (v == 'false' || v == '0') return false;
+    }
+    return null;
   }
 
   // ── OTA Firmware Update ──
@@ -957,6 +1241,7 @@ class HttpCameraProtocol extends CameraProtocol {
   void dispose() {
     _stopSecurityTimers();
     _connectionCtrl.close();
+    _authFailureCtrl.close();
     _liveViewRunning = false;
     _liveViewResponse = null;
     _liveViewController?.close();

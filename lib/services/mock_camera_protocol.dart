@@ -280,6 +280,21 @@ class MockCameraProtocol extends CameraProtocol {
     return true;
   }
 
+  // ── Sound Effects ──
+
+  bool _soundEnabled = true;
+
+  @override
+  Future<SoundSetting?> getSoundEnabled() async {
+    return SoundSetting(enabled: _soundEnabled);
+  }
+
+  @override
+  Future<SoundSetting> setSoundEnabled(bool enabled) async {
+    _soundEnabled = enabled;
+    return SoundSetting(enabled: enabled);
+  }
+
   // ── Helpers ──
 
   _StoredPhoto? _findPhoto(String id) {

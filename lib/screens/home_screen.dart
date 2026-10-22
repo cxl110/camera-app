@@ -37,7 +37,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _firmwareUpdateAvailable = false;
   final FirmwareService _firmwareService = FirmwareService();
 
+  // Sound effect switch state (API v1.6 /sound). null = not known yet.
+  bool? _soundEnabled;
+  bool _soundSupported = true;
+  bool _soundBusy = false;
+  /// Guards against an in-flight GET /sound overwriting a newer user toggle.
+  int _soundSeq = 0;
+
+  /// The camera answered but refused our token (HTTP 403). Not a connection
+  /// loss: /info and /stream still work, only token-checked endpoints fail.
+  /// Without this the user just sees a black preview and a dead sound button.
+  bool _authRejected = false;
+
   StreamSubscription<ConnectionStatus>? _connectionSub;
+  StreamSubscription<bool>? _authFailureSub;
   Stream<Uint8List>? _liveViewStream;
 
   // Reconnect watchdog: when disconnected, poll /info every few seconds so the
@@ -52,12 +65,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initConnection();
+    _listenForAuthFailures();
+  }
+
+  /// Show/hide the "camera rejected our token" banner.
+  void _listenForAuthFailures() {
+    final protocol = context.read<CameraProtocol>();
+    if (protocol is! HttpCameraProtocol) return;
+    _authFailureSub = protocol.authFailureStream.listen((rejected) {
+      if (!mounted) return;
+      setState(() => _authRejected = rejected);
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectionSub?.cancel();
+    _authFailureSub?.cancel();
     _reconnectWatchdog?.cancel();
     _stopLiveView();
     super.dispose();
@@ -71,6 +96,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _retryConnection().then((_) {
         if (mounted && _isConnected && !_liveViewActive) {
           _startLiveView();
+        }
+        // The camera may have been power-cycled while we were in the
+        // background — re-read its sound switch state.
+        if (mounted && _isConnected) {
+          _refreshSoundSetting(force: true);
         }
       });
     } else if (state == AppLifecycleState.paused) {
@@ -99,6 +129,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _startLiveView();
           // Check for firmware update
           if (_otaSupported) _checkFirmwareUpdate();
+          // Read the sound switch state (v1.6 firmware; old firmware 404s).
+          _soundEnabled = null;
+          _soundSupported = true;
+          _authRejected = false; // fresh connection — clear the stale warning
+          _refreshSoundSetting();
         } else {
           AppLog.info('Home', 'Camera disconnected');
           _stopLiveView();
@@ -227,6 +262,111 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // result == false: user cancelled before updating — keep the button.
   }
 
+  // ── Sound Effect Switch (API v1.6 §12) ──
+
+  /// Read the camera's capture sound switch so the button shows the real state.
+  ///
+  /// Best-effort: on old firmware the endpoint 404s and the control is hidden.
+  /// A 403 (token refused) is different — it is reported so the UI can explain
+  /// it rather than greying the switch out with a wrong reason.
+  Future<void> _refreshSoundSetting({bool force = false}) async {
+    if (!_soundSupported && !force) return;
+    if (_soundEnabled != null && !force) return; // already known
+
+    final seq = ++_soundSeq;
+    SoundSetting? setting;
+    try {
+      setting = await _protocol.getSoundEnabled();
+    } on CameraAuthException {
+      if (!mounted || seq != _soundSeq) return;
+      AppLog.info('Home', 'Sound switch unavailable: token rejected (403)');
+      return; // auth banner is driven by the protocol's authFailureStream
+    }
+    if (!mounted || seq != _soundSeq) return;
+
+    if (setting == null) {
+      // Camera unreachable / request failed — leave the state unknown. The
+      // button stays disabled until a later connection event retries.
+      return;
+    }
+
+    setState(() {
+      _soundSupported = setting!.supported;
+      _soundEnabled = setting.supported ? setting.enabled : null;
+    });
+    AppLog.info('Home',
+        'Sound switch: enabled=${setting.enabled} supported=${setting.supported}');
+  }
+
+  /// Flip the capture sound switch on the camera (persisted on the device).
+  Future<void> _onToggleSound() async {
+    final current = _soundEnabled;
+    if (!_isConnected || _soundBusy || current == null) return;
+
+    final target = !current;
+    final seq = ++_soundSeq;
+    setState(() {
+      _soundBusy = true;
+      _soundEnabled = target; // optimistic — feels instant
+    });
+
+    try {
+      final result = await _protocol.setSoundEnabled(target);
+      if (!mounted || seq != _soundSeq) return;
+      setState(() {
+        _soundBusy = false;
+        _soundEnabled = result.enabled;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.enabled ? '🔊 Capture sound ON' : '🔇 Capture sound OFF'),
+          backgroundColor: const Color(0xFF1A1A2E),
+          duration: const Duration(milliseconds: 900),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 160),
+        ),
+      );
+      if (!result.persisted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Applied, but the camera could not save it — it may reset after a reboot.'),
+            backgroundColor: const Color(0xFFD89A0F),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } on CameraAuthException catch (e) {
+      if (!mounted || seq != _soundSeq) return;
+      AppLog.info('Home', 'setSoundEnabled rejected by camera: $e');
+      setState(() {
+        _soundBusy = false;
+        _soundEnabled = current; // roll back the optimistic flip
+      });
+      // The auth banner explains the root cause; keep the toast short.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Camera rejected the access token — see the warning above'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted || seq != _soundSeq) return;
+      AppLog.error('Home', 'setSoundEnabled failed', e);
+      setState(() {
+        _soundBusy = false;
+        _soundEnabled = current; // roll back the optimistic flip
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sound setting failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   void _showWiFiGuide() {
     if (!mounted) return;
     showDialog(
@@ -315,6 +455,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onError: (e) {
           debugPrint('[HomeScreen] live view error: $e');
           _liveViewActive = false;
+
+          // Token refused (API v1.7). Two cases:
+          //  - locked: the device is in its 60 s temp lockout. Waiting is the
+          //    only useful response; retrying just re-arms the window.
+          //  - otherwise: v1.7 self-heals the device clock from two consecutive
+          //    rejected tokens, so a bounded retry DOES help — the protocol also
+          //    re-syncs /rtc in the background.
+          if (e is CameraAuthException) {
+            if (e.locked) {
+              AppLog.info('Home', 'Live view paused: camera temporarily locked (60s)');
+              _scheduleLiveViewRetry(
+                delay: const Duration(seconds: 60),
+                reason: 'temp lock expired',
+              );
+              return;
+            }
+            AppLog.info('Home', 'Live view blocked: token rejected, letting device self-heal');
+            _scheduleLiveViewRetry(
+              delay: const Duration(seconds: 3),
+              reason: 'token rejected, retrying for device self-heal',
+            );
+            return;
+          }
+
           // Camera unreachable — stop hammering. The connection state machine
           // (heartbeat / /info watchdog) will restart live view once the
           // camera is back. Only do a few bounded retries for transient blips
@@ -360,8 +524,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Restart live view once after [delay] (used for auth failures, where the
+  /// device needs time — not immediate retries) and re-check the token state.
+  ///
+  /// Deliberately does not consume the transient-error retry budget: a 60 s temp
+  /// lock or a self-heal window is not a "the camera is flaky" signal.
+  void _scheduleLiveViewRetry({
+    required Duration delay,
+    required String reason,
+  }) {
+    if (!mounted || !_isConnected) return;
+    AppLog.info('Home',
+        'Live view retry scheduled in ${delay.inSeconds}s ($reason)');
+    Future.delayed(delay, () {
+      if (!mounted || !_isConnected) return;
+      _liveViewRetryCount = 0; // fresh budget for the new attempt
+      _startLiveView();
+      // Refresh the sound switch too — it failed for the same reason.
+      _refreshSoundSetting(force: true);
+    });
+  }
+
   void _stopLiveView() {
-    _startLiveViewTimer?.cancel();
     if (_liveViewActive) {
       AppLog.info('Home', 'Stopping live view (was active)');
     }
@@ -370,6 +554,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       _protocol.stopLiveView();
     } catch (_) {}
+  }
+
+  /// Warning strip shown when the camera answers but refuses our token.
+  ///
+  /// Live view (token-checked on this firmware), capture, gallery and the sound
+  /// switch all fail in this state while the connection indicator still says
+  /// "Connected" — without this banner that looks like random breakage.
+  ///
+  /// API v1.7: there is no permanent lockout. A 60 s temp lock clears itself and
+  /// the device self-heals its clock, so the wording says "recovering" rather
+  /// than "disabled" and the retry is automatic.
+  Widget _buildAuthBanner() {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF3A2A00),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_outline, color: Color(0xFFD89A0F), size: 16),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Camera rejected the access token. Recovering automatically — '
+              'if this persists, check the phone date & time.',
+              style: TextStyle(color: Color(0xFFD89A0F), fontSize: 11, height: 1.35),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              final protocol = _protocol;
+              if (protocol is HttpCameraProtocol) protocol.syncRtc();
+              _retryConnection();
+            },
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 28),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Retry', style: TextStyle(color: Color(0xFFD89A0F), fontSize: 11)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── UI ──
@@ -382,6 +609,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Column(
           children: [
             _buildTopBar(),
+            if (_authRejected) _buildAuthBanner(),
             Expanded(
               child: CameraPreview(
                 isConnected: _isConnected,
@@ -394,6 +622,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 lastPhoto: currentPhoto,
                 onShutter: _onShutterPressed,
                 enabled: _isConnected,
+                soundEnabled: _soundSupported ? _soundEnabled : null,
+                soundBusy: _soundBusy,
+                onToggleSound: _onToggleSound,
+                cameraConnected: _isConnected,
+                authRejected: _authRejected,
               ),
             ),
             const SizedBox(height: 24),

@@ -55,6 +55,21 @@ abstract class CameraProtocol {
 
   /// Delete a photo from camera.
   Future<bool> deletePhoto(String photoId);
+
+  // ── Sound Effects (API v1.6) ──
+
+  /// Query the camera's capture sound effect switch (photo + recording start).
+  ///
+  /// Returns null when the camera cannot answer (not connected / old firmware
+  /// that doesn't implement `/sound`).
+  Future<SoundSetting?> getSoundEnabled();
+
+  /// Set the camera's capture sound effect switch. The setting is persisted on
+  /// the device (`/mnt/UDISK/sound_enabled`) and survives reboot.
+  ///
+  /// Throws [SoundControlException] when the camera rejects or cannot serve the
+  /// request (e.g. old firmware returning 404).
+  Future<SoundSetting> setSoundEnabled(bool enabled);
 }
 
 // ── Data Models ──
@@ -137,6 +152,66 @@ class DownloadProgress {
   double get percent => total > 0 ? received / total : 0.0;
 
   const DownloadProgress({required this.received, required this.total});
+}
+
+// ── Sound Effect Switch (API v1.6 §12) ──
+
+/// State of the camera's capture sound effect switch.
+class SoundSetting {
+  /// true = the photo / recording-start beep is on (factory default).
+  final bool enabled;
+
+  /// Whether the camera can actually answer `/sound` at all. Old firmware
+  /// (pre-v1.6) returns 404 — the UI should then hide/disable the control
+  /// instead of showing a switch that does nothing.
+  final bool supported;
+
+  /// true = the value was written to the device's persistent storage and will
+  /// survive a reboot. false = applied now but NOT persisted (usually because
+  /// the device's UDISK is read-only) — worth telling the user about.
+  final bool persisted;
+
+  const SoundSetting({
+    required this.enabled,
+    this.supported = true,
+    this.persisted = true,
+  });
+
+  /// Camera cannot handle `/sound` (unsupported firmware / not reachable).
+  static const SoundSetting unsupported = SoundSetting(
+    enabled: true,
+    supported: false,
+    persisted: false,
+  );
+}
+
+/// Raised when the camera refuses a `/sound` request.
+class SoundControlException implements Exception {
+  final String message;
+  const SoundControlException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+/// Raised when the camera rejects our access token (HTTP 403).
+///
+/// This is NOT a connection failure: `/info` and `/stream` may still answer,
+/// only the token-checked endpoints refuse. Two flavours exist (API v1.7):
+/// the token is simply wrong, or the device is inside its 60 s temporary
+/// lockout after 10 consecutive failures ([locked] == true). There is no
+/// permanent lockout in v1.7 — both situations recover on their own.
+class CameraAuthException implements Exception {
+  final String message;
+
+  /// true = device answered `403 Locked` (temporary, auto-expires in 60 s).
+  /// Retrying immediately is pointless; waiting is the correct response.
+  final bool locked;
+
+  const CameraAuthException(this.message, {this.locked = false});
+
+  @override
+  String toString() => message;
 }
 
 // ── OTA Firmware Update ──
