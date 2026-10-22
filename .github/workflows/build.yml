@@ -76,6 +76,19 @@ jobs:
       - name: Add CoreMLPlugin.swift to Xcode project
         run: python scripts/add_coreml_to_xcode.py
 
+      # The project was migrated from Swift Package Manager to CocoaPods, but
+      # the generated-package references were left behind in project.pbxproj.
+      # Xcode would keep resolving them and link the OLD plugin set (which
+      # included permission_handler_apple) next to the CocoaPods plugins.
+      - name: Remove Swift Package Manager integration
+        run: |
+          flutter config --no-enable-swift-package-manager
+          python scripts/remove_spm_from_xcode.py
+
+      # Apple requires the app to ship its own privacy manifest.
+      - name: Add PrivacyInfo.xcprivacy to Xcode project
+        run: python scripts/add_privacy_manifest_to_xcode.py
+
       - name: Build iOS (no codesign)
         run: |
           PBX="ios/Runner.xcodeproj/project.pbxproj"
@@ -109,8 +122,15 @@ jobs:
           cp -r build/ios/iphoneos/Runner.app Payload/
           # Standard IPA structure: Payload/Runner.app/... at zip root
           # -0 = store mode (no compression) to prevent binary corruption
+          # rm first: `zip` updates an existing archive in place and would keep
+          # entries that are no longer part of the app.
+          rm -f CameraApp.ipa
           zip -0 -r CameraApp.ipa Payload/
           rm -rf Payload
+          echo "=== IPA contents (frameworks) ==="
+          unzip -l CameraApp.ipa | awk '{print $4}' | grep "Frameworks/.*framework/" | cut -d/ -f4 | sort -u
+          echo "=== privacy manifest ==="
+          unzip -l CameraApp.ipa | grep -c "PrivacyInfo.xcprivacy" || true
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4

@@ -1,1 +1,8 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+// The Runner target's Profile build configuration also points at this file
+// (standard Flutter template), so the Pods profile config has to be included
+// here too — otherwise CocoaPods 1.15+ refuses to integrate the project.
+// Note: in xcconfig files a plain "#" line is a preprocessor directive, so
+// comments must use "//".
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"
 #include "Generated.xcconfig"

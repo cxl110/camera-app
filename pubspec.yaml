@@ -41,7 +41,8 @@ dependencies:
   # Utilities
   intl: ^0.19.0
   uuid: ^4.5.1
-  exif: ^3.3.0
+  # exif: 已移除 —— 全工程没有任何代码读取 EXIF（App 从不处理照片 GPS 元数据），
+  # 留着只会在上架审核时多出一个无用的隐私面。
 
 dev_dependencies:
   flutter_test:

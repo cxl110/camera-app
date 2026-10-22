@@ -16,14 +16,17 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
 
-    <!-- EXIF 位置信息 -->
-    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION"/>
+    <!-- 注意：不要声明 ACCESS_MEDIA_LOCATION。
+         本应用不读取照片的 GPS 元数据（EXIF 位置从未被使用），
+         声明它只会在 Android 13+ 申请照片权限时多弹一个
+         “允许访问照片中的位置信息吗？” 的无谓授权框，
+         上架审核也会被追问用途。 -->
 
     <!-- 快门触感反馈 -->
     <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
-        android:label="相机伴侣"
+        android:label="Camera Companion"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
