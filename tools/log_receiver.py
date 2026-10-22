@@ -17,11 +17,24 @@ from datetime import datetime
 
 PORT = 8080
 SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs_received")
+# 后台自动运行时（开机自启、无控制台）把启动/接收记录也写一份到文件，便于确认服务在跑
+LOG_FILE = os.path.join(SAVE_DIR, "_receiver.log")
+
+
+def _log(msg):
+    line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    try:
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 class LogReceiver(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] POST {self.path} Content-Length={self.headers.get('Content-Length', '?')}")
+        _log(f"POST {self.path} Content-Length={self.headers.get('Content-Length', '?')}")
         if self.path == "/upload":
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length == 0:
@@ -37,11 +50,15 @@ class LogReceiver(http.server.BaseHTTPRequestHandler):
             with open(filepath, "wb") as f:
                 f.write(body)
 
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 收到日志: {filename} ({len(body)} bytes)")
+            _log(f"收到日志: {filename} ({len(body)} bytes)")
             self._respond(200, f"OK: {filename}")
         else:
-            print(f"  Unknown path: {self.path}")
+            _log(f"  Unknown path: {self.path}")
             self._respond(404, f"Not Found: {self.path}")
+
+    def do_GET(self):
+        # 健康检查：手机/浏览器打开 http://<PC-IP>:8080/ 可确认服务在线
+        self._respond(200, f"CameraApp log receiver OK ({datetime.now().isoformat(timespec='seconds')})")
 
     def _respond(self, code, msg):
         self.send_response(code)
@@ -51,18 +68,24 @@ class LogReceiver(http.server.BaseHTTPRequestHandler):
         self.wfile.write(msg.encode("utf-8"))
 
     def log_message(self, format, *args):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
+        pass  # 由 _log 统一记录，避免后台运行时噪声
 
 
 if __name__ == "__main__":
-    print(f"日志接收服务已启动: http://0.0.0.0:{PORT}")
-    print(f"日志保存目录: {SAVE_DIR}")
-    print("等待手机上传... (Ctrl+C 停止)")
-    print()
+    # 允许快速重启（上一个实例刚退出时端口还处于 TIME_WAIT）
+    http.server.HTTPServer.allow_reuse_address = True
 
-    server = http.server.HTTPServer(("0.0.0.0", PORT), LogReceiver)
+    _log(f"日志接收服务已启动: http://0.0.0.0:{PORT}")
+    _log(f"日志保存目录: {SAVE_DIR}")
+
+    try:
+        server = http.server.HTTPServer(("0.0.0.0", PORT), LogReceiver)
+    except OSError as e:
+        _log(f"启动失败（端口 {PORT} 可能已被占用）: {e}")
+        sys.exit(1)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n服务已停止")
+        _log("服务已停止")
         server.server_close()
