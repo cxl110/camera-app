@@ -1,6 +1,6 @@
 {
   "frame_00": {
-    "file": "frame_00.png",
+    "file": "frame_00.webp",
     "size": [
       2154,
       1909
@@ -18,7 +18,7 @@
     "borderPct": 17.7
   },
   "frame_06": {
-    "file": "frame_06.png",
+    "file": "frame_06.webp",
     "size": [
       2095,
       1902
@@ -36,7 +36,7 @@
     "borderPct": 32.7
   },
   "frame_07": {
-    "file": "frame_07.png",
+    "file": "frame_07.webp",
     "size": [
       1992,
       1983
@@ -54,7 +54,7 @@
     "borderPct": 18.9
   },
   "kodak 400 52": {
-    "file": "kodak 400 52.png",
+    "file": "kodak 400 52.webp",
     "size": [
       2087,
       1592
@@ -72,7 +72,7 @@
     "borderPct": 24.1
   },
   "frame_09": {
-    "file": "frame_09.png",
+    "file": "frame_09.webp",
     "size": [
       1118,
       1005
@@ -90,7 +90,7 @@
     "borderPct": 29.5
   },
   "frame_10": {
-    "file": "frame_10.png",
+    "file": "frame_10.webp",
     "size": [
       2517,
       2254
@@ -108,7 +108,7 @@
     "borderPct": 30.6
   },
   "frame_11": {
-    "file": "frame_11.png",
+    "file": "frame_11.webp",
     "size": [
       2038,
       1808
@@ -126,7 +126,7 @@
     "borderPct": 32.5
   },
   "frame_12": {
-    "file": "frame_12.png",
+    "file": "frame_12.webp",
     "size": [
       2138,
       1500
@@ -144,7 +144,7 @@
     "borderPct": 15.3
   },
   "frame_13": {
-    "file": "frame_13.png",
+    "file": "frame_13.webp",
     "size": [
       3402,
       2597
@@ -162,7 +162,7 @@
     "borderPct": 26.2
   },
   "frame_14": {
-    "file": "frame_14.png",
+    "file": "frame_14.webp",
     "size": [
       5770,
       4337
@@ -180,7 +180,7 @@
     "borderPct": 19.4
   },
   "frame_16": {
-    "file": "frame_16.png",
+    "file": "frame_16.webp",
     "size": [
       2118,
       1394
@@ -198,7 +198,7 @@
     "borderPct": 20.6
   },
   "frame_17": {
-    "file": "frame_17.png",
+    "file": "frame_17.webp",
     "size": [
       2388,
       1604
@@ -216,7 +216,7 @@
     "borderPct": 18.1
   },
   "frame_18": {
-    "file": "frame_18.png",
+    "file": "frame_18.webp",
     "size": [
       1885,
       1184
@@ -234,7 +234,7 @@
     "borderPct": 33.6
   },
   "frame_19": {
-    "file": "frame_19.png",
+    "file": "frame_19.webp",
     "size": [
       2622,
       1506
@@ -252,7 +252,7 @@
     "borderPct": 50.3
   },
   "frame_20": {
-    "file": "frame_20.png",
+    "file": "frame_20.webp",
     "size": [
       3039,
       2661
@@ -270,7 +270,7 @@
     "borderPct": 34.9
   },
   "frame_21": {
-    "file": "frame_21.png",
+    "file": "frame_21.webp",
     "size": [
       4903,
       4300
@@ -288,7 +288,7 @@
     "borderPct": 33.7
   },
   "frame_22": {
-    "file": "frame_22.png",
+    "file": "frame_22.webp",
     "size": [
       4842,
       4341
@@ -306,7 +306,7 @@
     "borderPct": 34.5
   },
   "frame_23": {
-    "file": "frame_23.png",
+    "file": "frame_23.webp",
     "size": [
       4981,
       4227
@@ -324,7 +324,7 @@
     "borderPct": 34.4
   },
   "frame_24": {
-    "file": "frame_24.png",
+    "file": "frame_24.webp",
     "size": [
       4966,
       4381
@@ -342,7 +342,7 @@
     "borderPct": 36.4
   },
   "frame_25": {
-    "file": "frame_25.png",
+    "file": "frame_25.webp",
     "size": [
       4953,
       4381
@@ -360,7 +360,7 @@
     "borderPct": 36.7
   },
   "frame_26": {
-    "file": "frame_26.png",
+    "file": "frame_26.webp",
     "size": [
       1189,
       1080
@@ -378,7 +378,7 @@
     "borderPct": 35.5
   },
   "frame_27": {
-    "file": "frame_27.png",
+    "file": "frame_27.webp",
     "size": [
       2030,
       1821
@@ -396,7 +396,7 @@
     "borderPct": 32.3
   },
   "frame_28": {
-    "file": "frame_28.png",
+    "file": "frame_28.webp",
     "size": [
       2950,
       2509
@@ -414,7 +414,7 @@
     "borderPct": 29.0
   },
   "frame_29": {
-    "file": "frame_29.png",
+    "file": "frame_29.webp",
     "size": [
       4000,
       3245

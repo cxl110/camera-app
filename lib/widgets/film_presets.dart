@@ -18,21 +18,21 @@ class FilmPresets extends StatelessWidget {
   // Film presets with placeholder colors for representative images
   static const _presets = [
     _PresetData('NONE', Color(0xFF3A3A3A)),
-    _PresetData('ACROS', Color(0xFF2D2D2D), 'assets/film_presets/acros.png'),
+    _PresetData('ACROS', Color(0xFF2D2D2D), 'assets/film_presets/acros.webp'),
     _PresetData('CLASSIC CHROME', Color(0xFF4A6B8A),
-        'assets/film_presets/classic_chrome.png'),
-    _PresetData('ETERNA', Color(0xFF6B5B4F), 'assets/film_presets/eterna.png'),
+        'assets/film_presets/classic_chrome.webp'),
+    _PresetData('ETERNA', Color(0xFF6B5B4F), 'assets/film_presets/eterna.webp'),
     _PresetData('CLASSIC Neg.', Color(0xFF5A7A5A),
-        'assets/film_presets/classic_neg.png'),
+        'assets/film_presets/classic_neg.webp'),
     _PresetData('PRO Neg.Hi', Color(0xFF8B7D6B),
-        'assets/film_presets/pro_neg_hi.png'),
-    _PresetData('VELVIA', Color(0xFF4A8B3A), 'assets/film_presets/velvia.png'),
-    _PresetData('ASTIA', Color(0xFFC4956A), 'assets/film_presets/astia.png'),
-    _PresetData('PROVIA', Color(0xFF6A8BAF), 'assets/film_presets/provia_100f.png'),
-    _PresetData('Pro 400H', Color(0xFF7BA4B8), 'assets/film_presets/pro_400h.png'),
-    _PresetData('Portra 400', Color(0xFFC4956B), 'assets/film_presets/portra_400.png'),
-    _PresetData('Gold 200', Color(0xFFD4A44A), 'assets/film_presets/gold_200.png'),
-    _PresetData('UltraMax 400', Color(0xFFC4783C), 'assets/film_presets/ultramax_400.png'),
+        'assets/film_presets/pro_neg_hi.webp'),
+    _PresetData('VELVIA', Color(0xFF4A8B3A), 'assets/film_presets/velvia.webp'),
+    _PresetData('ASTIA', Color(0xFFC4956A), 'assets/film_presets/astia.webp'),
+    _PresetData('PROVIA', Color(0xFF6A8BAF), 'assets/film_presets/provia_100f.webp'),
+    _PresetData('Pro 400H', Color(0xFF7BA4B8), 'assets/film_presets/pro_400h.webp'),
+    _PresetData('Portra 400', Color(0xFFC4956B), 'assets/film_presets/portra_400.webp'),
+    _PresetData('Gold 200', Color(0xFFD4A44A), 'assets/film_presets/gold_200.webp'),
+    _PresetData('UltraMax 400', Color(0xFFC4783C), 'assets/film_presets/ultramax_400.webp'),
   ];
 
   @override

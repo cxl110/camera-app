@@ -12,7 +12,7 @@
 | minSdk / targetSdk | 24 / **36** | merged manifest（Play 要求 targetSdk ≥ 35） |
 | 64 位支持 | arm64-v8a + armeabi-v7a | 同上 |
 | **16 KB 内存页** | 64 位库全部合规 | `scripts/inspect_play_readiness.py` |
-| 包体积 | AAB 143.5 MB（含 ~50 MB 符号表，Play 会剔除；实际下载约 90 MB） | 同上 |
+| 包体积 | AAB **48.7 MB**（素材转 WebP 前是 143.5 MB）；Play 按 ABI 分发，arm64 机型实际下载约 30 MB | 同上 |
 | **上传签名** | 已从 debug key 换成正式上传密钥 | `jarsigner -verify` 通过，证书 `CN=SQ Cam` |
 | 权限 | 10 个减到 6 个 | 见下方说明 |
 | 商店图 | 图标 512×512、特征图 1024×500、手机截图 5 张 1284×2568 | `store/play/` |
@@ -61,7 +61,7 @@ powershell -File scripts\build_play_bundle.ps1
 |---|---|---|
 | 应用名称 | 30 字 | `SQ Cam - Film Camera` |
 | 简短说明 | 80 字 | `Transfer photos from your ZIVIGo camera and apply film looks.` |
-| 完整说明 | 4000 字 | 可参考 `docs/APPSTORE_SUBMISSION.md` 里的英文文案改写 |
+| 完整说明 | 4000 字 | 可参考 `docs/APPSTORE_SUBMISSION.md` 里的英文文案改写。**措辞注意**：滤镜、颗粒、漏光、边框全部在手机 App 内计算，相机只负责拍摄和 WiFi 传图——不要写成「相机内置滤镜」，否则和产品实际能力不符 |
 | 应用图标 | 512×512 | `store/play/icon-512.png` ✅ |
 | 特征图 | 1024×500 | `store/play/feature-graphic-1024x500.png` ✅ |
 | 手机截图 | 2–8 张 | `store/play/screenshots/`（5 张）✅ |
@@ -91,7 +91,28 @@ iPhone 截图是 1284×2778（1:2.16），**超过 Play 的 2:1 上限会被拒*
 
 ## 三、建议做但不会阻塞上架
 
-1. **包体积**：`assets/frames/` 30 张 PNG 共 **83 MB**，占了安装包的大头。转成 WebP（质量 85）大约能压到 8–12 MB。对 4G 用户的首装体验影响很直接。
-2. **安卓启动图**：`launch_background.xml` 还是纯白，iOS 那边有 LaunchScreen。建议换成米色底 + 产品图，保持一致。
-3. **重拍安卓截图**：现在这 5 张是 iPhone 截图裁的，状态栏是 iOS 的。用安卓真机重拍会更自然（也顺便能展示安卓特有的表现）。
-4. **Gradle 8.13 → 8.14+**：Flutter 已经警告该版本很快不再支持。
+1. **安卓启动图**：`launch_background.xml` 还是纯白，iOS 那边有 LaunchScreen。建议换成米色底 + 产品图，保持一致。
+2. **重拍安卓截图**：现在这 5 张是 iPhone 截图裁的，状态栏是 iOS 的。用安卓真机重拍会更自然（也顺便能展示安卓特有的表现）。
+3. **Gradle 8.13 → 8.14+**：Flutter 已经警告该版本很快不再支持。
+4. **未引用的边框素材**：`assets/frames/` 里有 12 张 WebP（frame_00/01/02/03/04/05/07/12/14/16/17/29）在 `borders_screen.dart` 的列表里没有任何引用，约 1 MB。要么补进列表，要么删掉。
+
+---
+
+## 四、素材体积优化（已完成）
+
+`assets/frames/` 和 `assets/film_presets/` 原来是 PNG，合计 101 MB，占了安装包的 70%：
+
+| 目录 | 转换前 | 转换后 | 降幅 |
+|---|---|---|---|
+| `assets/frames/`（29 张边框，大部分是大尺寸 RGBA 覆盖层） | 87.1 MB | 6.9 MB | −92% |
+| `assets/film_presets/`（12 张胶片罐预览图） | 14.4 MB | 1.2 MB | −92% |
+| **AAB 总体** | **143.5 MB** | **48.7 MB** | **−66%** |
+
+质量用 `scripts/compare_frame_quality.py` 逐张比对过：边框的 RGB PSNR 40.5–42.8 dB、**alpha 通道误差 0**（胶片边框的镂空边缘完全没糊），预览图 PSNR 39.9 dB，肉眼看不出差别。
+
+复现方式：
+
+```powershell
+python scripts\convert_assets_to_webp.py --dir assets/frames --apply
+python scripts\compare_frame_quality.py frame_22.png assets/frames   # 看 PSNR + 并排对比图
+```

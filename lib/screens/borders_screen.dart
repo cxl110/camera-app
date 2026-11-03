@@ -26,23 +26,23 @@ class _BordersScreenState extends State<BordersScreen> {
 
   static const _borderFiles = [
     'NONE',          // No border — deselect
-    'frame_19.png',  // 50% border
-    'frame_25.png',  // 37%
-    'frame_24.png',  // 36%
-    'frame_26.png',  // 36%
-    'frame_20.png',  // 35%
-    'frame_21.png',  // 34%
-    'frame_22.png',  // 34%
-    'frame_23.png',  // 34%
-    'frame_18.png',  // 34%
-    'frame_06.png',  // 33%
-    'frame_11.png',  // 33%
-    'frame_27.png',  // 32%
-    'frame_10.png',  // 31%
-    'frame_09.png',  // 29%
-    'frame_28.png',  // 29%
-    'frame_13.png',  // 26%
-    'kodak 400 52.png',  // 24%
+    'frame_19.webp',  // 50% border
+    'frame_25.webp',  // 37%
+    'frame_24.webp',  // 36%
+    'frame_26.webp',  // 36%
+    'frame_20.webp',  // 35%
+    'frame_21.webp',  // 34%
+    'frame_22.webp',  // 34%
+    'frame_23.webp',  // 34%
+    'frame_18.webp',  // 34%
+    'frame_06.webp',  // 33%
+    'frame_11.webp',  // 33%
+    'frame_27.webp',  // 32%
+    'frame_10.webp',  // 31%
+    'frame_09.webp',  // 29%
+    'frame_28.webp',  // 29%
+    'frame_13.webp',  // 26%
+    'kodak 400 52.webp',  // 24%
   ];
 
   @override

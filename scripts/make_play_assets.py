@@ -61,13 +61,13 @@ def make_feature_graphic():
     draw = ImageDraw.Draw(canvas)
     title = ImageFont.truetype(FONT_BOLD, 92)
     sub = ImageFont.truetype(FONT_REG, 34)
-    tag = ImageFont.truetype(FONT_BOLD, 26)
+    tag = ImageFont.truetype(FONT_BOLD, 25)
 
     x = H + 40
     draw.text((x, 150), "SQ Cam", font=title, fill=INK)
     draw.text((x, 262), "Film looks for your", font=sub, fill=MUTED)
     draw.text((x, 302), "ZIVIGo camera", font=sub, fill=MUTED)
-    draw.text((x, 372), "WiFi transfer  ·  On-device filters", font=tag, fill=(150, 96, 60))
+    draw.text((x, 372), "WiFi transfer  ·  Filters run in the app", font=tag, fill=(150, 96, 60))
 
     canvas.save(OUT / "feature-graphic-1024x500.png", "PNG", optimize=True)
     print("wrote", (OUT / "feature-graphic-1024x500.png").relative_to(ROOT), canvas.size)
