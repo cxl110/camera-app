@@ -4,45 +4,28 @@ import 'package:flutter/material.dart';
 
 /// Capture control buttons below the viewfinder.
 ///
-/// Layout: [Thumbnail] ── [Shutter ○] ── [Timer 🕐 | Sound 🔊]
+/// Layout: [Thumbnail] 鈹€鈹€ [Shutter 鈼媇 鈹€鈹€ [Timer 馃晲]
 ///
-/// - Left: Last captured photo thumbnail
-/// - Center: White circle shutter button
-/// - Right: Timer shutter button (5s countdown, slightly smaller) and the
-///   camera capture-sound switch (API v1.6 `/sound`)
+/// - Left: last captured photo thumbnail
+/// - Center: white circle shutter button
+/// - Right: timer shutter button (5s countdown)
+///
+/// The camera's capture-sound switch lives in the top bar (see
+/// [SoundToggleIcon]) 鈥?it used to sit here, where a fixed 72pt side slot could
+/// not hold both it and the timer and the button was pushed off screen.
+///
+/// Both sides are [Expanded] so they always get the same width and the shutter
+/// stays optically centred.
 class CaptureControls extends StatefulWidget {
   final Uint8List? lastPhoto;
   final VoidCallback onShutter;
   final bool enabled;
-
-  /// Capture-sound switch state on the camera: `null` = unknown / unsupported
-  /// (button shown dimmed and disabled).
-  final bool? soundEnabled;
-
-  /// A sound request is in flight — show a spinner and ignore taps.
-  final bool soundBusy;
-
-  /// Called when the user taps the sound button.
-  final VoidCallback? onToggleSound;
-
-  /// Whether the camera is reachable — used only to explain a disabled sound
-  /// button (disconnected vs. old firmware).
-  final bool cameraConnected;
-
-  /// The camera refused our access token (HTTP 403) — a third reason the
-  /// button can be dead, and the one the user can actually act on.
-  final bool authRejected;
 
   const CaptureControls({
     super.key,
     this.lastPhoto,
     required this.onShutter,
     this.enabled = true,
-    this.soundEnabled,
-    this.soundBusy = false,
-    this.onToggleSound,
-    this.cameraConnected = false,
-    this.authRejected = false,
   });
 
   @override
@@ -52,10 +35,6 @@ class CaptureControls extends StatefulWidget {
 class _CaptureControlsState extends State<CaptureControls> {
   int? _countdown; // null = not counting, 5..1 = counting down
   Timer? _timer;
-
-  /// Fixed width of the leading/trailing groups, so the shutter stays centered
-  /// even though the trailing group holds two buttons (timer + sound).
-  static const double _sideWidth = 72;
 
   void _startTimer() {
     if (!widget.enabled || _countdown != null) return;
@@ -94,31 +73,31 @@ class _CaptureControlsState extends State<CaptureControls> {
   Widget build(BuildContext context) {
     return Container(
       height: 80,
-      // 24 (not 32) so the trailing timer + sound pair still fits on narrow
-      // phones (e.g. iPhone SE, 320pt wide).
+      // 24pt side padding: on a 320pt-wide phone the two Expanded side slots
+      // get ~108pt each, which comfortably holds thumbnail (44) + gap + sound
+      // switch (50) on the left and the timer (54 while counting) on the right.
       padding: const EdgeInsets.symmetric(horizontal: 24),
       decoration: const BoxDecoration(
         color: Color(0xFF0A0A0A),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ── Left: Thumbnail ──
-          SizedBox(
-            width: _sideWidth,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _ThumbnailButton(image: widget.lastPhoto),
+          // 鈹€鈹€ Left: Thumbnail 鈹€鈹€
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                _ThumbnailButton(image: widget.lastPhoto),
+              ],
             ),
           ),
 
-          // ── Center: Shutter ──
+          // 鈹€鈹€ Center: Shutter 鈹€鈹€
           _ShutterButton(onTap: widget.onShutter, enabled: widget.enabled),
 
-          // ── Right: Timer shutter + sound switch ──
-          SizedBox(
-            width: _sideWidth,
+          // 鈹€鈹€ Right: Timer shutter 鈹€鈹€
+          Expanded(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -127,14 +106,6 @@ class _CaptureControlsState extends State<CaptureControls> {
                   onCancel: _cancelTimer,
                   countdown: _countdown,
                   enabled: widget.enabled,
-                ),
-                const SizedBox(width: 12),
-                _SoundButton(
-                  enabled: widget.soundEnabled,
-                  busy: widget.soundBusy,
-                  onTap: widget.onToggleSound,
-                  cameraConnected: widget.cameraConnected,
-                  authRejected: widget.authRejected,
                 ),
               ],
             ),
@@ -238,7 +209,7 @@ class _ShutterButtonState extends State<_ShutterButton> {
   }
 }
 
-/// Timer shutter button — 5s countdown then captures.
+/// Timer shutter button 鈥?5s countdown then captures.
 ///
 /// Slightly smaller than the main shutter. Shows countdown number when active.
 /// Long press during countdown to cancel.
@@ -321,162 +292,6 @@ class _TimerButtonState extends State<_TimerButton> {
                       ? const Color(0xFF333333)
                       : const Color(0xFF666666),
                 ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Camera capture-sound switch (API v1.6 `GET/POST /sound`).
-///
-/// Small circular button next to the timer button. Speaker glyph = sound on,
-/// muted speaker = sound off; a small amber dot marks the "on" state. Keep it
-/// visually lighter than the timer button so it doesn't compete with it.
-class _SoundButton extends StatefulWidget {
-  /// null = state unknown / unsupported by this firmware → disabled.
-  final bool? enabled;
-  final bool busy;
-  final VoidCallback? onTap;
-  final bool cameraConnected;
-  final bool authRejected;
-
-  const _SoundButton({
-    this.enabled,
-    this.busy = false,
-    this.onTap,
-    this.cameraConnected = false,
-    this.authRejected = false,
-  });
-
-  @override
-  State<_SoundButton> createState() => _SoundButtonState();
-}
-
-class _SoundButtonState extends State<_SoundButton> {
-  bool _pressed = false;
-
-  /// Tapping the dimmed button explains why nothing happened instead of
-  /// silently ignoring the user.
-  void _explainUnavailable() {
-    final String msg;
-    if (widget.authRejected) {
-      msg = 'Camera rejected the access token — recovering, or check the phone date & time';
-    } else if (!widget.cameraConnected) {
-      msg = 'Connect to the camera to change its capture sound';
-    } else {
-      msg = 'This camera firmware has no sound switch — update firmware';
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: const Color(0xFFD89A0F),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(bottom: 160),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = widget.enabled;
-    final known = state != null;
-    final on = state ?? false;
-    final canTap = known && !widget.busy && widget.onTap != null;
-
-    final Color iconColor;
-    if (!known) {
-      iconColor = const Color(0xFF555555);
-    } else if (on) {
-      iconColor = const Color(0xFFD89A0F);
-    } else {
-      iconColor = const Color(0xFF8A8A8A);
-    }
-
-    final Color bgColor = !known
-        ? const Color(0xFF2A2A2A)
-        : (on
-            ? const Color(0xFFD89A0F).withOpacity(0.16)
-            : Colors.white.withOpacity(0.06));
-
-    return Tooltip(
-      message: !known
-          ? (widget.authRejected
-              ? 'Capture sound unavailable (token rejected)'
-              : (widget.cameraConnected
-                  ? 'Capture sound unavailable (old firmware)'
-                  : 'Capture sound (camera offline)'))
-          : (on ? 'Capture sound: ON' : 'Capture sound: OFF'),
-      child: GestureDetector(
-        onTapDown: canTap ? (_) => setState(() => _pressed = true) : null,
-        onTapUp: canTap
-            ? (_) {
-                setState(() => _pressed = false);
-                widget.onTap!();
-              }
-            : null,
-        onTapCancel: () => setState(() => _pressed = false),
-        onTap: canTap
-            ? widget.onTap
-            : (!widget.busy ? _explainUnavailable : null),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: bgColor,
-            border: Border.all(
-              color: on
-                  ? const Color(0xFFD89A0F).withOpacity(0.6)
-                  : Colors.white.withOpacity(known ? 0.14 : 0.06),
-            ),
-            boxShadow: _pressed
-                ? []
-                : [
-                    BoxShadow(
-                      color: Colors.white.withOpacity(known ? 0.06 : 0.02),
-                      blurRadius: 6,
-                      spreadRadius: 0.5,
-                    ),
-                  ],
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              if (widget.busy)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Color(0xFFD89A0F),
-                  ),
-                )
-              else
-                Icon(
-                  on ? Icons.volume_up : Icons.volume_off,
-                  size: 21,
-                  color: iconColor,
-                ),
-              // Amber dot = sound on, mirroring the "active" indicator style
-              // used elsewhere (e.g. the OTA badge in the top bar).
-              if (on && !widget.busy)
-                Positioned(
-                  right: 9,
-                  top: 9,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFD89A0F),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-            ],
-          ),
         ),
       ),
     );

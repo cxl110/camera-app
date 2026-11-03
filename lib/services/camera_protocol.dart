@@ -85,6 +85,23 @@ class ConnectionStatus {
   final String? fwVersion; // Firmware version, e.g. "V0.5-20260729"
   final bool? otaSupported; // Whether device supports WiFi OTA update
 
+  // ── v1.8 device clock metadata (the hardware has no RTC battery) ──
+
+  /// Whether the device clock has been synchronised this boot (`/info` field
+  /// `clock_synced`). When false, the device's absolute time — and therefore
+  /// photo dates — may be arbitrarily behind; only the ordering is reliable.
+  final bool? clockSynced;
+
+  /// Where the boot clock came from: `rtc`, `flash`, `build` or `none`.
+  final String? clockSource;
+
+  /// Per-boot identifier. Changes when the camera reboots, at which point the
+  /// device clock restarts from its saved value and must be re-synced.
+  final String? bootId;
+
+  /// Device clock at the time of the last response (Unix seconds).
+  final int? deviceTimestamp;
+
   const ConnectionStatus({
     required this.connected,
     this.ssid,
@@ -93,6 +110,10 @@ class ConnectionStatus {
     this.cameraModel,
     this.fwVersion,
     this.otaSupported,
+    this.clockSynced,
+    this.clockSource,
+    this.bootId,
+    this.deviceTimestamp,
   });
 }
 
@@ -144,6 +165,29 @@ class PhotoListResult {
     required this.limit,
     required this.photos,
   });
+}
+
+/// Chronological sort key derived from a device filename.
+///
+/// Device names are `IMG_YYYYMMDD_HHMMSS` / `VID_YYYYMMDD_HHMMSS`, so the part
+/// after the first underscore sorts lexicographically by capture time.
+///
+/// API v1.8 §时间模型 point 1: **the filename order is always correct** — the
+/// boot clock never restarts earlier than the newest file on disk — while
+/// `mtime` is shifted around by `/rtc` (and by the mtime backfill). So the album
+/// must be ordered by this key, never by `mtime`, or a clock jump reorders the
+/// grid mid-session.
+///
+/// Taking the timestamp part (not the whole name) also keeps photos and videos
+/// interleaved chronologically instead of grouping all `IMG_` before all `VID_`.
+String captureKeyOf(String fileName) {
+  final i = fileName.indexOf('_');
+  return i >= 0 ? fileName.substring(i + 1) : fileName;
+}
+
+/// Sort [photos] in place, newest capture first.
+void sortPhotosNewestFirst(List<CameraPhoto> photos) {
+  photos.sort((a, b) => captureKeyOf(b.name).compareTo(captureKeyOf(a.name)));
 }
 
 class DownloadProgress {

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../services/camera_protocol.dart';
 import '../services/http_camera_protocol.dart';
@@ -11,8 +13,10 @@ import '../services/log_uploader.dart';
 import '../widgets/wifi_indicator.dart';
 import '../widgets/camera_preview.dart';
 import '../widgets/capture_controls.dart';
+import '../widgets/sound_toggle_icon.dart';
 import '../widgets/bottom_tabs.dart';
 import '../widgets/ota_update_dialog.dart';
+import '../services/dev_flags.dart';
 import 'effects_screen.dart';
 import 'borders_screen.dart';
 import 'gallery_screen.dart';
@@ -30,6 +34,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isVerifying = true;
   String _activeTab = 'CAMERA';
   String? _cameraModel;
+
+  /// Trial mode: the user loaded a photo from their own library so the editing
+  /// screens are usable without the camera. This exists because a reviewer (or
+  /// a shopper deciding whether to buy the camera) has no ZIVIGo hardware — with
+  /// no way in, the app is an empty screen.
+  bool _trialMode = false;
 
   // OTA firmware update state
   String? _cameraFwVersion;
@@ -128,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // stream from a previous session is stale/closed.
           _startLiveView();
           // Check for firmware update
-          if (_otaSupported) _checkFirmwareUpdate();
+          if (kOtaTools) _checkFirmwareUpdate();
           // Read the sound switch state (v1.6 firmware; old firmware 404s).
           _soundEnabled = null;
           _soundSupported = true;
@@ -189,17 +199,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _otaSupported = status.otaSupported ?? false;
           _isVerifying = false;
         });
-        if (_otaSupported) _checkFirmwareUpdate();
+        if (kOtaTools) _checkFirmwareUpdate();
         // Live view start is handled by the connectionStream listener, but
         // guard against the no-op emit case (already connected → no event).
         if (!_liveViewActive) {
           _liveViewRetryCount = 0;
           _startLiveView();
         }
+      } else if (_isVerifying) {
+        // The check finished and the camera is not there. Stop showing
+        // "Checking..." — otherwise the label never clears and, worse, the
+        // no-camera trial entry stays hidden because it is gated on this flag.
+        // The reconnect watchdog keeps polling every 5 s in the background.
+        setState(() => _isVerifying = false);
       }
     } catch (_) {
       // Silent retry — don't change connection state on transient failures.
       // The connectionStream listener will handle genuine disconnects.
+      if (mounted && _isVerifying) setState(() => _isVerifying = false);
     }
   }
 
@@ -209,6 +226,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ── Firmware Update ──
 
   Future<void> _checkFirmwareUpdate() async {
+    // OTA flashing is a debug/field-service tool only — never surfaced in a
+    // release build, so skip the check entirely there.
+    if (!kOtaTools) return;
+
     final hasFw = await _firmwareService.hasFirmware();
     if (!hasFw || !mounted) return;
 
@@ -556,8 +577,97 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  /// Warning strip shown when the camera answers but refuses our token.
+  // ── Trial mode (no camera) ──
+
+  /// Pick a photo from the user's library and open the editing flow with it.
   ///
+  /// Deliberately uses the system photo picker (PHPicker on iOS 14+): it runs
+  /// out of process, so no photo-library permission prompt is involved and it
+  /// works in the simulator — which is exactly the situation an App Review
+  /// tester is in, holding no ZIVIGo camera.
+  Future<void> _startTrialMode({String openTab = 'EFFECTS'}) async {
+    final XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        // Filters run on-device; 2400px is plenty of detail for a preview and
+        // keeps peak memory well under the limit on older iPhones.
+        maxWidth: 2400,
+        maxHeight: 2400,
+        imageQuality: 92,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppLog.error('Home', 'Trial mode: photo pick failed', e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the photo library')),
+      );
+      return;
+    }
+
+    if (picked == null || !mounted) return; // user cancelled
+
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+
+    final imageService = context.read<ImageService>();
+    // Trial mode: a library photo, so "now" is the closest thing to a capture time.
+    imageService.loadPhoto(bytes, name: picked.name, capturedAt: DateTime.now());
+    setState(() => _trialMode = true);
+
+    // Land on whichever editor the user was trying to reach.
+    await _navigateTo(
+      openTab == 'BORDERS'
+          ? const BordersScreen(wifiConnected: true)
+          : const EffectsScreen(wifiConnected: true),
+    );
+
+    // Coming back, the edited photo stays in the preview strip so the user can
+    // go straight back into a different effect.
+    if (mounted) setState(() {});
+  }
+
+  void _exitTrialMode() {
+    setState(() => _trialMode = false);
+    // Only drop the photo if it came from trial mode; a camera capture stays.
+    if (!_isConnected) {
+      context.read<ImageService>().clearCurrentPhoto();
+    }
+  }
+
+  /// Strip that makes it obvious the editor is running on a library photo, not
+  /// on the camera. Without it the empty preview plus a flattened photo is
+  /// confusing.
+  Widget _buildTrialBanner() {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF10203A),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_awesome_outlined, color: Color(0xFF7FB2FF), size: 15),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Trial mode — editing a photo from your library. Camera is offline.',
+              style: TextStyle(color: Color(0xFF9FC4F5), fontSize: 11, height: 1.3),
+            ),
+          ),
+          TextButton(
+            onPressed: _exitTrialMode,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 26),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Exit', style: TextStyle(color: Color(0xFF9FC4F5), fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Warning strip shown when the camera answers but refuses our token.
   /// Live view (token-checked on this firmware), capture, gallery and the sound
   /// switch all fail in this state while the connection indicator still says
   /// "Connected" — without this banner that looks like random breakage.
@@ -610,10 +720,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             _buildTopBar(),
             if (_authRejected) _buildAuthBanner(),
+            if (_trialMode && !_isConnected) _buildTrialBanner(),
             Expanded(
               child: CameraPreview(
                 isConnected: _isConnected,
                 frameStream: _liveViewStream,
+                onTryWithoutCamera:
+                    (_isConnected || _isVerifying) ? null : _startTrialMode,
               ),
             ),
             Selector<ImageService, Uint8List?>(
@@ -622,11 +735,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 lastPhoto: currentPhoto,
                 onShutter: _onShutterPressed,
                 enabled: _isConnected,
-                soundEnabled: _soundSupported ? _soundEnabled : null,
-                soundBusy: _soundBusy,
-                onToggleSound: _onToggleSound,
-                cameraConnected: _isConnected,
-                authRejected: _authRejected,
               ),
             ),
             const SizedBox(height: 24),
@@ -684,8 +792,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const Spacer(),
-          // Firmware update button
-          if (_firmwareUpdateAvailable)
+          // Firmware update button. Debug-only: flashing camera firmware from a
+          // phone is a field-service action, not something shipped to App Store
+          // customers (an interrupted flash can brick the camera).
+          if (kOtaTools && _firmwareUpdateAvailable)
             IconButton(
               onPressed: _onFirmwareUpdate,
               icon: Stack(
@@ -709,11 +819,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               tooltip: 'Firmware update',
             ),
-          // Upload logs button
-          IconButton(
-            onPressed: _onUploadLogs,
-            icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
-            tooltip: 'Upload Logs',
+          // Upload logs button. Debug-only: it asks for a PC's LAN IP and posts
+          // the on-device log file there. Shipping it would be a data-collection
+          // feature that has to be declared in App Privacy, for no user value.
+          if (kLogTools)
+            IconButton(
+              onPressed: _onUploadLogs,
+              icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
+              tooltip: 'Upload Logs',
+            ),
+          // Capture-sound switch: bare speaker glyph, left of the photos folder.
+          SoundToggleIcon(
+            enabled: _soundSupported ? _soundEnabled : null,
+            busy: _soundBusy,
+            cameraConnected: _isConnected,
+            authRejected: _authRejected,
+            onTap: _onToggleSound,
           ),
           IconButton(
             onPressed: _isConnected ? _onOpenGallery : null,
@@ -809,7 +930,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Use fullImage (12MP) as the shared photo. Thumbnail is too small.
       final bytes = result.fullImage ?? result.thumbnail;
       if (bytes != null) {
-        context.read<ImageService>().loadPhoto(bytes, name: result.name);
+        // Carry the device's capture time (v1.8: mtime is the real capture time)
+        // so exports keep the correct date.
+        context
+            .read<ImageService>()
+            .loadPhoto(bytes, name: result.name, capturedAt: result.timestamp);
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -832,10 +957,106 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Tapped EFFECTS/BORDERS while not connected and not in trial mode.
+  Future<void> _offerTrialForTab(String tab) async {
+    final wantsTrial = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: const Color(0xFF14141F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Camera not connected',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${tab == 'BORDERS' ? 'Borders' : 'Film filters'} need a photo to work on. '
+              'Connect to the camera, or try it with a photo from your library.',
+              style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 13, height: 1.45),
+            ),
+            const SizedBox(height: 20),
+            ..._trialSheetButton(
+              ctx,
+              icon: Icons.auto_awesome_outlined,
+              label: 'Try with a photo from my library',
+              primary: true,
+              onTap: () => Navigator.pop(ctx, true),
+            ),
+            const SizedBox(height: 10),
+            ..._trialSheetButton(
+              ctx,
+              icon: Icons.wifi,
+              label: 'Connect the camera instead',
+              primary: false,
+              onTap: () => Navigator.pop(ctx, false),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (wantsTrial == true) {
+      if (mounted) await _startTrialMode(openTab: tab);
+    } else if (wantsTrial == false) {
+      _showWiFiGuide();
+    }
+  }
+
+  List<Widget> _trialSheetButton(
+    BuildContext ctx, {
+    required IconData icon,
+    required String label,
+    required bool primary,
+    required VoidCallback onTap,
+  }) {
+    return [
+      SizedBox(
+        width: double.infinity,
+        child: primary
+            ? FilledButton.icon(
+                onPressed: onTap,
+                icon: Icon(icon, size: 18),
+                label: Text(label),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D5BD8),
+                  padding: const EdgeInsets.all(14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              )
+            : OutlinedButton.icon(
+                onPressed: onTap,
+                icon: Icon(icon, size: 18),
+                label: Text(label),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                  padding: const EdgeInsets.all(14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+      ),
+    ];
+  }
+
   void _onTabChanged(String tab) {
+    // Trial mode makes the editing tabs reachable without the camera; the
+    // screens themselves only gate on this single boolean.
+    final canEdit = _isConnected || _trialMode;
+    if (!canEdit && (tab == 'EFFECTS' || tab == 'BORDERS')) {
+      // Do not send the user into a dead end: offer the trial instead.
+      _offerTrialForTab(tab);
+      return;
+    }
     if (tab == 'EFFECTS') {
       _stopLiveView();
-      _navigateTo(EffectsScreen(wifiConnected: _isConnected)).then((_) {
+      _navigateTo(EffectsScreen(wifiConnected: canEdit)).then((_) {
         // Always try to restart — connection events will keep it alive if connected.
         _startLiveView();
       });
@@ -843,7 +1064,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (tab == 'BORDERS') {
       _stopLiveView();
-      _navigateTo(BordersScreen(wifiConnected: _isConnected)).then((_) {
+      _navigateTo(BordersScreen(wifiConnected: canEdit)).then((_) {
         _startLiveView();
       });
       return;

@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import 'neural_filter_client.dart';
 import 'coreml_bridge.dart';
 import 'app_log.dart';
+import 'jpeg_exif.dart';
 
 /// Manages local photo storage, caching, and image operations.
 class ImageService extends ChangeNotifier {
@@ -25,6 +26,11 @@ class ImageService extends ChangeNotifier {
   Uint8List? originalPhoto;
   Uint8List? currentPhoto;
   String? currentPhotoName;
+
+  /// When the current photo was **captured** (from `/list` `mtime` or the
+  /// capture response). API v1.8: the exported file must keep this time — falling
+  /// back to "now" would pile every photo onto the export day in Photos.
+  DateTime? currentPhotoCapturedAt;
 
   // Filter state preserved across page navigations.
   String selectedPreset = 'NONE';
@@ -56,10 +62,11 @@ class ImageService extends ChangeNotifier {
   /// Load a new photo as the shared current photo.
   ///
   /// Resets both the original and the working copy.
-  void loadPhoto(Uint8List bytes, {String? name}) {
+  void loadPhoto(Uint8List bytes, {String? name, DateTime? capturedAt}) {
     originalPhoto = bytes;
     currentPhoto = bytes;
     currentPhotoName = name ?? 'IMG_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    currentPhotoCapturedAt = capturedAt;
     notifyListeners();
   }
 
@@ -74,6 +81,7 @@ class ImageService extends ChangeNotifier {
     originalPhoto = null;
     currentPhoto = null;
     currentPhotoName = null;
+    currentPhotoCapturedAt = null;
     notifyListeners();
   }
 
@@ -137,7 +145,9 @@ class ImageService extends ChangeNotifier {
   /// the two so the UI can report honestly whether the photo reached the
   /// system gallery (what the user means by "saved").
   Future<SaveResult> saveWithUpscale(Uint8List imageBytes, String originalName,
-      {NeuralFilterClient? neuralClient, bool upscale = true}) async {
+      {NeuralFilterClient? neuralClient,
+      bool upscale = true,
+      DateTime? capturedAt}) async {
     Uint8List finalBytes = imageBytes;
 
     if (upscale) {
@@ -162,10 +172,25 @@ class ImageService extends ChangeNotifier {
     AppLog.info('ImageService',
         'Saving: ${finalBytes.length} bytes, upscale=$upscale, name=$originalName');
 
+    // API v1.8: keep the capture time. Editing re-encodes the JPEG and drops its
+    // metadata, so re-attach EXIF DateTimeOriginal and the file mtime; otherwise
+    // the photo library dates every export on the day it was exported.
+    final captureTime = capturedAt ?? currentPhotoCapturedAt;
+    final bytesToWrite = captureTime == null
+        ? finalBytes
+        : JpegExif.ensureDateTimeOriginal(finalBytes, captureTime);
+
     final name = p.basenameWithoutExtension(originalName);
     final outputPath = p.join(_editedDir!.path, '${name}.jpg');
     final file = File(outputPath);
-    await file.writeAsBytes(finalBytes);
+    await file.writeAsBytes(bytesToWrite);
+    if (captureTime != null) {
+      try {
+        await file.setLastModified(captureTime);
+      } catch (e) {
+        AppLog.info('ImageService', 'Could not set file mtime: $e');
+      }
+    }
 
     // Push a copy to the system photo gallery so it shows in Photos.app.
     // If this fails (plugin not registered, permission denied, disk full…)
@@ -183,7 +208,7 @@ class ImageService extends ChangeNotifier {
         }
       }
       if (galleryError == null) {
-        await Gal.putImageBytes(finalBytes, name: name);
+        await Gal.putImageBytes(bytesToWrite, name: name);
         gallerySaved = true;
         AppLog.info('ImageService', 'Saved to system gallery: $name');
       }
@@ -214,11 +239,22 @@ class ImageService extends ChangeNotifier {
   }
 
   /// Save an edited (filtered) image (without upscale).
-  Future<File> saveEditedImage(Uint8List bytes, String originalName) async {
+  Future<File> saveEditedImage(Uint8List bytes, String originalName,
+      {DateTime? capturedAt}) async {
+    final captureTime = capturedAt ?? currentPhotoCapturedAt;
+    final bytesToWrite = captureTime == null
+        ? bytes
+        : JpegExif.ensureDateTimeOriginal(bytes, captureTime);
+
     final name = p.basenameWithoutExtension(originalName);
     final outputPath = p.join(_editedDir!.path, '${name}_edited.jpg');
     final file = File(outputPath);
-    await file.writeAsBytes(bytes);
+    await file.writeAsBytes(bytesToWrite);
+    if (captureTime != null) {
+      try {
+        await file.setLastModified(captureTime);
+      } catch (_) {}
+    }
 
     _recentEdits.insert(
       0,

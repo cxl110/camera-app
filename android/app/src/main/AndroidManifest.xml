@@ -26,7 +26,7 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
-        android:label="Camera Companion"
+        android:label="SQ Cam"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

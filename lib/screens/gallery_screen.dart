@@ -10,6 +10,7 @@ import '../services/http_camera_protocol.dart';
 import '../services/image_service.dart';
 import '../services/video_transcoder.dart';
 import '../services/app_log.dart';
+import '../services/dev_flags.dart';
 
 /// iOS-style photo gallery browser with lazy loading.
 ///
@@ -19,7 +20,13 @@ import '../services/app_log.dart';
 /// - Single photo select → edit (EFFECTS)
 /// - Video download includes AVI→MP4 transcode
 class GalleryScreen extends StatefulWidget {
-  const GalleryScreen({super.key});
+  /// Whether to show the developer-only "Export Logs" action.
+  ///
+  /// Defaults to the build-level [kLogTools] switch so a store build can never
+  /// show it; tests pass `false`/`true` explicitly to cover both cases.
+  final bool showDevTools;
+
+  const GalleryScreen({super.key, this.showDevTools = kLogTools});
 
   @override
   State<GalleryScreen> createState() => _GalleryScreenState();
@@ -75,7 +82,11 @@ class _GalleryScreenState extends State<GalleryScreen> {
       setState(() {
         _photos.clear();
         _photos.addAll(result.photos);
-        _hasMore = result.photos.length >= _pageSize;
+        // Belt and braces: the protocol already returns newest-first, but
+        // re-sorting by the filename timestamp guarantees the grid can never be
+        // reordered by a clock jump (mtime is not a safe ordering key in v1.8).
+        sortPhotosNewestFirst(_photos);
+        _hasMore = _photos.length < result.total;
         _loading = false;
       });
     } catch (e) {
@@ -95,7 +106,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
       if (!mounted) return;
       setState(() {
         _photos.addAll(result.photos);
-        _hasMore = result.photos.length >= _pageSize;
+        sortPhotosNewestFirst(_photos);
+        _hasMore = _photos.length < result.total;
         _loadingMore = false;
       });
     } catch (_) {
@@ -146,7 +158,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
       if (!mounted) return;
       Navigator.pop(context);
-      context.read<ImageService>().loadPhoto(bytes, name: photo.name);
+      context.read<ImageService>()
+          .loadPhoto(bytes, name: photo.name, capturedAt: photo.timestamp);
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
@@ -204,7 +217,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
           }
         } else {
           setState(() => _currentProgress = 0.5);
-          final result = await imageService.saveWithUpscale(bytes, photo.name);
+          final result = await imageService.saveWithUpscale(bytes, photo.name,
+              capturedAt: photo.timestamp);
           if (result.gallerySaved) {
             gallerySavedCount++;
           } else {
@@ -315,8 +329,15 @@ class _GalleryScreenState extends State<GalleryScreen> {
         else ...[
           TextButton(onPressed: _photos.isNotEmpty ? _enterSelectMode : null,
             child: const Text('Select', style: TextStyle(color: Color(0xFFD89A0F), fontSize: 14))),
-          IconButton(icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
-            onPressed: _exportLogs, tooltip: 'Export Logs'),
+          // Developer-only: dumps the on-device log to a file. Not shipped to
+          // customers — this leaked into an early release build because it had
+          // no gate at all.
+          if (widget.showDevTools)
+            IconButton(
+              icon: const Icon(Icons.bug_report_outlined, color: Colors.white54, size: 20),
+              onPressed: _exportLogs,
+              tooltip: 'Export Logs',
+            ),
           IconButton(icon: const Icon(Icons.refresh, color: Colors.white54, size: 22),
             onPressed: _loading ? null : _loadPhotos, tooltip: 'Refresh'),
         ],

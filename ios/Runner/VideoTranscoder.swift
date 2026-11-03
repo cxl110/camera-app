@@ -749,6 +749,13 @@ final class H264Encoder {
 
         // Flip Y: CGContext origin is bottom-left, image origin top-left.
         ctx.interpolationQuality = .medium
+        // The sensor is mounted mirrored and firmware cannot correct it, so every
+        // frame is mirrored here. Doing it in the bitmap context we already have
+        // costs almost nothing, and the saved MP4 is then correct everywhere
+        // (Photos, QuickTime, share sheet) without relying on a track matrix that
+        // some players ignore.
+        ctx.translateBy(x: CGFloat(width), y: 0)
+        ctx.scaleBy(x: -1, y: 1)
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         return buffer
     }

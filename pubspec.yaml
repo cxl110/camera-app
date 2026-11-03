@@ -1,6 +1,9 @@
 name: camera_app
-description: 相机伴侣 - WiFi连接相机，AI滤镜编辑，水印，分享
-version: 1.1.0
+description: SQ Cam - 相机伴侣：WiFi 连接相机，滤镜编辑，水印，分享
+# App Store uploads require a numeric build number (CFBundleVersion) greater
+# than the previous upload. A bare "1.1.0" leaves FLUTTER_BUILD_NUMBER empty,
+# which fails upload validation with ITMS-90062.
+version: 1.2.0+24
 publish_to: none
 
 environment:
@@ -23,13 +26,13 @@ dependencies:
   path_provider: ^2.1.4
   path: ^1.9.0
 
-  # Camera / WiFi transfer (HTTP is pure Dart, works on ohos)
+  # Camera / WiFi transfer (pure Dart HTTP, no platform plugin needed)
   http: ^1.2.2
 
-  # Gallery save (system photo library) — needs ohos backend
+  # Gallery save (system photo library)
   gal: ^2.3.0
 
-  # Sharing logs / files via system share sheet — needs ohos backend (stub first)
+  # Sharing logs / files via system share sheet
   share_plus: ^10.1.4
 
   # CoreML/TFLite inference is handled via native platform channel
@@ -43,6 +46,7 @@ dependencies:
   uuid: ^4.5.1
   # exif: 已移除 —— 全工程没有任何代码读取 EXIF（App 从不处理照片 GPS 元数据），
   # 留着只会在上架审核时多出一个无用的隐私面。
+  # 需要写入 DateTimeOriginal 时用 lib/services/jpeg_exif.dart（手写，无依赖）。
 
 dev_dependencies:
   flutter_test:
@@ -58,7 +62,15 @@ flutter:
     - assets/models/
     - assets/frames/
     - assets/film_presets/
-    - assets/firmware/
+    # NOTE: assets/firmware/ 故意不在这里列。
+    #
+    # 商店版不带固件：多出约 9.6 MB，且刷写中断会把相机变砖。
+    #
+    # 内测/售后包临时挂载：
+    #   bash scripts/build_adhoc_ios.sh --ota
+    # 该脚本仅在三个文件齐全时才把这一行加进构建，构建结束后自动还原：
+    #   assets/firmware/manifest.json, boot.img, rootfs.img
+    # OTA 界面本身在 kOtaTools（services/dev_flags.dart）后面，商店版没有升级入口。
 
 flutter_launcher_icons:
   ios: true
