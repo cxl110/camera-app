@@ -53,3 +53,6 @@ build_artifacts/
 tools/test_upscale_*.jpg
 tools/logs_received/
 .hvigor/
+
+# 图标设计草稿（本地对比用，不入库）
+_icon_preview/

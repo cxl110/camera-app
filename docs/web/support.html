@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQ Cam 支持 / Support</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; padding:32px 20px 64px; font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; max-width:760px; margin-inline:auto; color:#1a1a1a; background:#fff; }
+  h1 { font-size:26px; margin:0 0 8px; }
+  h2 { font-size:19px; margin:34px 0 10px; padding-bottom:6px; border-bottom:1px solid #e5e5e5; }
+  .meta { color:#666; font-size:14px; margin-bottom:26px; }
+  .lang { margin:26px 0 8px; padding:10px 14px; background:#f5f5f5; border-radius:8px; font-size:14px; color:#444; }
+  ol,ul { padding-left:22px; }
+  li { margin:6px 0; }
+  .q { font-weight:600; margin:18px 0 4px; }
+  .a { margin:0 0 6px; }
+  code { background:#f2f2f2; padding:1px 5px; border-radius:4px; font-size:14px; }
+  .card { border:1px solid #e5e5e5; border-radius:10px; padding:16px 18px; margin:16px 0; }
+  footer { margin-top:48px; padding-top:16px; border-top:1px solid #e5e5e5; color:#666; font-size:14px; }
+  @media (prefers-color-scheme: dark) {
+    body { background:#111; color:#e8e8e8; }
+    h2 { border-color:#2a2a2a; }
+    .lang { background:#1c1c1c; color:#bbb; }
+    .card { border-color:#2a2a2a; }
+    code { background:#222; }
+    footer { border-color:#2a2a2a; color:#999; }
+  }
+</style>
+</head>
+<body>
+
+<h1>SQ Cam 支持</h1>
+<p class="meta">适用于 SQ Cam iOS 应用 · 最近更新：2026 年 11 月 1 日</p>
+
+<div class="card">
+  <strong>需要帮助？</strong> 发邮件到 <a href="mailto:support@example.com">support@example.com</a>，请附上：iPhone 型号、iOS 版本、应用版本（相机页 → 左上角“Connected”点击可看到固件版本），以及问题现象。
+</div>
+
+<h2>连接相机</h2>
+<ol>
+  <li>打开相机电源，等它启动完成（约 30 秒）。</li>
+  <li>iPhone「设置 → 无线局域网」里连接相机的热点，名称通常是 <code>ZIVIGo</code>。</li>
+  <li>首次连接时 iOS 会询问「是否允许查找本地网络中的设备」，<strong>必须点“允许”</strong>，否则应用无法与相机通信。</li>
+  <li>回到 SQ Cam，左上角显示 <strong>Connected</strong> 即连接成功。</li>
+</ol>
+
+<h2>常见问题</h2>
+
+<p class="q">应用一直显示 Disconnected</p>
+<p class="a">依次检查：相机是否已开机并完成启动；iPhone 是否仍连着相机热点（有些手机会自动切回流量网络，可在「无线局域网」里关闭“自动加入”其它网络）；本地网络权限是否被拒绝（设置 → 隐私与安全性 → 本地网络 → SQ Cam 打开）。</p>
+
+<p class="q">能看到取景画面，但拍照没反应</p>
+<p class="a">相机的图像处理需要时间，按下快门后请等待 3–8 秒。若提示 Capture Timeout，说明相机端没有及时输出图像，请重启相机后再试。</p>
+
+<p class="q">相册里是空的</p>
+<p class="a">相册只显示相机存储卡里的照片。若相机里确实没有照片（例如刚格式化），或拍照从未成功过，列表会是空的。</p>
+
+<p class="q">导出的照片日期不对</p>
+<p class="a">应用会使用相机提供的拍摄时间。若相机时钟不准，导出的时间也会不准——连接相机后应用会自动校时，随后导出的照片时间会恢复正常。</p>
+
+<p class="q">没有相机可以试用吗</p>
+<p class="a">可以。在未连接相机的界面点击 <strong>Try without a camera</strong>，然后从相册选一张照片，即可体验全部滤镜与边框。</p>
+
+<p class="q">视频下载后格式变了</p>
+<p class="a">相机录制的是 AVI 格式，iOS 相册不支持，因此应用会自动转成 MP4 后再保存，这是正常行为。</p>
+
+<h2>隐私</h2>
+<p>本应用不收集任何个人数据。详见 <a href="privacy.html">隐私政策</a>。</p>
+
+<hr style="margin:40px 0;border:none;border-top:1px solid #e5e5e5">
+
+<h1 style="font-size:22px">Support (English)</h1>
+<p class="meta">For the SQ Cam iOS app · Last updated: November 1, 2026</p>
+
+<div class="card">
+  <strong>Need help?</strong> Email <a href="mailto:support@example.com">support@example.com</a> with your iPhone model, iOS version, app version, and what went wrong.
+</div>
+
+<h2>Connecting to the camera</h2>
+<ol>
+  <li>Power on the camera and wait for it to finish booting (about 30 seconds).</li>
+  <li>On your iPhone, join the camera's Wi-Fi hotspot (usually <code>ZIVIGo</code>) in Settings → Wi-Fi.</li>
+  <li>The first time, iOS asks whether the app may find devices on your local network. <strong>Tap Allow</strong> — without it the app cannot talk to the camera.</li>
+  <li>Return to SQ Cam; the top-left indicator should read <strong>Connected</strong>.</li>
+</ol>
+
+<h2>FAQ</h2>
+
+<p class="q">It stays on “Disconnected”</p>
+<p class="a">Check that the camera has finished booting, that the iPhone is still on the camera's network (some phones switch back to cellular), and that Local Network access is enabled for SQ Cam in Settings → Privacy &amp; Security → Local Network.</p>
+
+<p class="q">Live view works but the shutter does nothing</p>
+<p class="a">Capturing takes 3–8 seconds on the camera. If you see “Capture Timeout”, the camera is not producing frames — restart it and try again.</p>
+
+<p class="q">The gallery is empty</p>
+<p class="a">The gallery lists what is on the camera's storage card. If the card is empty, the list is empty.</p>
+
+<p class="q">Exported photos have the wrong date</p>
+<p class="a">The app uses the capture time reported by the camera. The app re-syncs the camera clock on connect, after which exported dates are correct.</p>
+
+<p class="q">Can I try it without a camera?</p>
+<p class="a">Yes — tap <strong>Try without a camera</strong> on the disconnected screen and pick a photo from your library.</p>
+
+<p class="q">Videos change format after download</p>
+<p class="a">The camera records AVI, which the iOS photo library does not support, so the app converts to MP4 before saving.</p>
+
+<h2>Privacy</h2>
+<p>The app collects no personal data. See our <a href="privacy.html">Privacy Policy</a>.</p>
+
+<footer>
+  © 2026 <span>COMPANY NAME</span>. All rights reserved.
+</footer>
+
+</body>
+</html>
