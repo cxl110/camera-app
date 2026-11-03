@@ -110,7 +110,11 @@ class ImageService extends ChangeNotifier {
     final photo = img.decodeImage(photoBytes);
     if (photo == null) return photoBytes;
 
-    final frame = img.decodePng(frameBytes);
+    // decodeImage, not decodePng: the frames are WebP now. decodePng only
+    // sniffs the PNG signature and returns null for WebP, which silently fell
+    // through to "return the photo unchanged" — the saved photo lost its border
+    // while the preview still showed one. See test/border_composite_test.dart.
+    final frame = img.decodeImage(frameBytes);
     if (frame == null) return photoBytes;
 
     // Stretch frame to photo dimensions (frame may be distorted/cropped).
