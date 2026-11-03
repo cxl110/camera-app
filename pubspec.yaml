@@ -75,3 +75,12 @@ flutter:
 flutter_launcher_icons:
   ios: true
   image_path: "assets/icon.png"
+  # iOS rejects icons with an alpha channel at upload time.
+  remove_alpha_ios: true
+  android: "ic_launcher"
+  min_sdk_android: 24
+  # Adaptive icon: Android crops the outer third of the 108dp canvas, so the
+  # full-bleed square artwork is shrunk into the 72dp safe zone on transparency
+  # (scripts/make_android_adaptive_icon.py) over a flat studio-backdrop colour.
+  adaptive_icon_background: "#E1DFDA"
+  adaptive_icon_foreground: "assets/icon_foreground.png"
