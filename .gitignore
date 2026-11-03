@@ -56,3 +56,6 @@ tools/logs_received/
 
 # 图标设计草稿（本地对比用，不入库）
 _icon_preview/
+
+# Android 上传密钥（Google Play App Signing 的 upload key）
+android/key.properties

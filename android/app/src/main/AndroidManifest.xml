@@ -6,15 +6,18 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
 
     <!-- 相机（未来直拍功能） -->
-    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- CAMERA 暂不声明：Release 里没有任何地方打开手机摄像头。
+         试用模式用的是系统相册选择器（Photo Picker），不需要摄像头权限；
+         ImageSource.camera 只出现在 mock_camera_protocol.dart，仅测试使用。
+         真要做手机直拍时再把这一行加回来。 -->
 
-    <!-- 存储：保存照片（Android 10 以下用旧权限，13+ 用细分权限） -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32"/>
+    <!-- 存储：只有「保存到相册」需要写权限，且 Android 10 以下才需要；
+         Android 10+ 走 MediaStore，不需要任何存储权限。
+         READ_MEDIA_IMAGES / READ_MEDIA_VIDEO / READ_EXTERNAL_STORAGE 全部删掉：
+         本应用从不读取相册（选图走系统 Photo Picker，进程外运行、零权限），
+         留着只会触发 Google Play 的「照片和视频权限」申报与审核追问。 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
 
     <!-- 注意：不要声明 ACCESS_MEDIA_LOCATION。
          本应用不读取照片的 GPS 元数据（EXIF 位置从未被使用），
